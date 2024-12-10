@@ -1,6 +1,6 @@
-"""ViT model configuration"""
+"""Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
 
-from typing import Optional
+from typing import Literal, Optional
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
@@ -103,15 +103,18 @@ class ViTConfig(PretrainedConfig):
         self.encoder_stride = encoder_stride
 
 
+AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
+
+
 class ModifiedViTConfig(ViTConfig):
     def __init__(
         self,
-        attention_type: str = "softmax",
+        attention_type: AttentionType = "softmax",
         attention_temperature: Optional[float] = None,
-        output_intermediates: bool = False,
+        return_intermediates: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.attention_type = attention_type
         self.attention_temperature = attention_temperature
-        self.output_intermediates = output_intermediates
+        self.return_intermediates = return_intermediates

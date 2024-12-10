@@ -1,12 +1,13 @@
 from math import ceil
-from typing import Literal, Optional, Tuple, Type
+from typing import Literal, Tuple
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 import jax.random as jr
 import optax
-from cvxpy import Parameter
+
+from projections import sparsemax
 
 Array = jax.Array
 
@@ -32,7 +33,7 @@ class Parameterization(eqx.Module):
             self, jnp.eye(self.n)
         )
 
-    def loss_fn(self, Q: Array, K: Array) -> Array:
+    def loss_fn(self, query: Array, key: Array) -> Array:
         raise NotImplementedError
 
     def multiply(self, x: Array) -> Array:
@@ -52,13 +53,15 @@ class LRParameterization(Parameterization):
     def init_fn(self, key: Array) -> Tuple[Array, Array]:
         raise NotImplementedError
 
-    def loss_fn(self, Q: Array, K: Array) -> Array:
-        Kbar = jax.vmap(self.multiply.__func__, in_axes=(None, 1), out_axes=1)(self, K)
-        QTQ = Q.T @ Q
-        KTK = K.T @ K
+    def loss_fn(self, query: Array, key: Array) -> Array:
+        Kbar = jax.vmap(self.multiply.__func__, in_axes=(None, 1), out_axes=1)(
+            self, key
+        )
+        QTQ = query.T @ query
+        KTK = key.T @ key
         return (
             1 / 2 * self.gram_trace()
-            - jnp.trace(Q.T @ Kbar)
+            - jnp.trace(query.T @ Kbar)
             + 1 / 2 * jnp.trace(QTQ @ KTK)
         ) / self.n**2
 
@@ -148,9 +151,7 @@ class Monarch(LRParameterization):
         return params_to_simplex(R_params_zeroed)
 
     def multiply(self, x: Array) -> Array:
-
         pad_amount = self.n_padded - self.n
-
         if self.padding_type == "pre":
             x_padded = jnp.pad(x, (pad_amount, 0))
         else:
@@ -209,47 +210,75 @@ def solve(
 
 
 def low_rank_solve(
-    Q: Array,
-    K: Array,
+    query: Array,
+    key: Array,
     num_steps: int,
     tx: optax.GradientTransformation,
     rank: int,
     return_history: bool,
 ) -> Parameterization:
-    p_init = LowRank(Q.shape[0], rank)
-    return solve(p_init, Q, K, num_steps, tx, return_history)
+    p_init = LowRank(query.shape[0], rank)
+    return solve(p_init, query, key, num_steps, tx, return_history)
 
 
 def monarch_solve(
-    Q: Array,
-    K: Array,
+    query: Array,
+    key: Array,
     num_steps: int,
     tx: optax.GradientTransformation,
     block_size: int,
     padding_type: PaddingType,
     return_history: bool,
 ) -> Parameterization:
-    p_init = Monarch(Q.shape[0], block_size, padding_type)
-    return solve(p_init, Q, K, num_steps, tx, return_history)
+    p_init = Monarch(query.shape[0], block_size, padding_type)
+    return solve(p_init, query, key, num_steps, tx, return_history)
 
 
-# if __name__ == "__main__":
+def main():
+    b = 1
+    n = 16
+    d = 4
+    query = jr.normal(jr.key(0), (b, n, d)) / jnp.sqrt(d)
+    key = jr.normal(jr.key(1), (b, n, d)) / jnp.sqrt(d)
 
-#     p = Monarch(3)  # type: ignore
-#     L_params = p.L_params
-#     R_params = p.R_params
+    in_axes = (0, 0) + 5 * (None,)
+    # in_axes = (0, 0) + 4 * (None,)
+    # attn_weight = jax.vmap(
+    #     low_rank_solve,
+    #     in_axes=in_axes,
+    # )(query, key, 100, optax.adam(0.1), 4, False)
 
-#     L = p.get_L()
-#     R = p.get_R()
+    # attn_weight = low_rank_solve(query, key, 100, optax.adam(0.1), 4, False)
+    attn_weight = jax.vmap(
+        monarch_solve,
+        in_axes=in_axes,
+    )(query, key, 100, optax.adam(0.1), 4, "pre", False)
+    attn_weight_e2e = jax.vmap(attn_weight.get_e2e.__func__)(attn_weight)
+    # attn_weight_e2e = attn_weight.get_e2e()
 
-#     perm = jnp.arange(4).reshape(2, 2).T.reshape(-1)
+    # print(attn_weight.multiply(jnp.eye(n)[:, 0]))
+    # print(attn_weight.multiply.__func__(attn_weight, jnp.eye(n)[:, 0]))
 
-#     L_flat = jax.scipy.linalg.block_diag(*L)
-#     R_flat = jax.scipy.linalg.block_diag(*R)
-#     Lp_flat = L_flat[jnp.ix_(perm, perm)]
+    # import matplotlib.pyplot as plt
 
-#     print(Lp_flat, R_flat)
-#     print()
+    # fig, ax = plt.subplots(1, 2)
+    # ax[0].imshow(sparsemax(jnp.einsum("bqd,bkd->bqk", query, key)[0], axis=-1))
+    # ax[1].imshow(attn_weight_e2e[0])
+    # plt.show()
+    print(
+        jnp.einsum("...qk,...kd->...qd", attn_weight_e2e, query)
+        - jax.vmap(
+            jax.vmap(attn_weight.multiply.__func__, in_axes=(None, 1), out_axes=1),
+            in_axes=(0, 0),
+        )(attn_weight, query)
+    )
+    # print(
+    #     attn_weight_e2e @ query
+    #     == jax.vmap(attn_weight.multiply.__func__, in_axes=(None, 1), out_axes=1)(
+    #         attn_weight, query
+    #     )
+    # )
 
-#     result = R_flat @ jnp.array([1, 1, 1, 0])
-#     print(L_flat @ result)
+
+if __name__ == "__main__":
+    main()

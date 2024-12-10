@@ -1,3 +1,5 @@
+"""Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/modeling_flax_vit.py."""
+
 from __future__ import annotations
 
 from typing import Optional, Tuple
@@ -5,6 +7,7 @@ from typing import Optional, Tuple
 import flax.linen as nn
 import jax
 import jax.numpy as jnp
+from einshape import jax_einshape as einshape
 from flax.core.frozen_dict import FrozenDict, freeze, unfreeze
 from flax.traverse_util import flatten_dict, unflatten_dict
 from flax.typing import Shape as Shape
@@ -24,8 +27,9 @@ from transformers.utils import (
     add_start_docstrings_to_model_forward,
 )
 
-from attentions import dot_product_attention_weights
+from attentions import dot_product_attention_weights, efficient_attention_weights
 from configuration_vit import ModifiedViTConfig, ViTConfig
+from utils import vmap_lift
 
 VIT_START_DOCSTRING = r"""
 
@@ -211,23 +215,70 @@ class FlaxViTSelfAttention(nn.Module):
         if not deterministic and self.config.attention_probs_dropout_prob > 0.0:
             dropout_rng = self.make_rng("dropout")
 
-        attn_weights = dot_product_attention_weights(
-            query_states,
-            key_states,
-            dropout_rng=dropout_rng,
-            dropout_rate=self.config.attention_probs_dropout_prob,
-            broadcast_dropout=True,
-            deterministic=deterministic,
-            dtype=self.dtype,
-            precision=None,
-            config=self.config,
-            module=self,
-        )
+        attention_type = self.config.attention_type
 
-        attn_output = jnp.einsum("...hqk,...khd->...qhd", attn_weights, value_states)
-        attn_output = attn_output.reshape(attn_output.shape[:2] + (-1,))
+        if attention_type in ["low-rank", "monarch"]:
+            attn_weights_structured = efficient_attention_weights(
+                query_states,
+                key_states,
+                dropout_rng=dropout_rng,
+                dropout_rate=self.config.attention_probs_dropout_prob,
+                broadcast_dropout=True,
+                deterministic=deterministic,
+                dtype=self.dtype,
+                config=self.config,
+                module=self,
+            )
+            attn_output = vmap_lift(
+                jax.vmap(
+                    attn_weights_structured.multiply.__func__,
+                    in_axes=(None, 1),
+                    out_axes=1,
+                ),
+                query_states.ndim - 2,
+                in_axes=(0, 0),
+                out_axes=0,
+            )(attn_weights_structured, einshape("...khd->...hkd", value_states))
+            attn_output = einshape("...hqd->...qhd", attn_output)
+            attn_output = attn_output.reshape(attn_output.shape[:2] + (-1,))
 
-        outputs = (attn_output, attn_weights) if output_attentions else (attn_output,)
+            if output_attentions:
+                attn_weights = vmap_lift(
+                    attn_weights_structured.get_e2e.__func__,
+                    query_states.ndim - 2,
+                    0,
+                    0,
+                )(attn_weights_structured)
+                outputs = (attn_output, attn_weights)
+            else:
+                outputs = (attn_output,)
+
+        elif attention_type in ["sparsemax", "softmax"]:
+            attn_weights = dot_product_attention_weights(
+                query_states,
+                key_states,
+                dropout_rng=dropout_rng,
+                dropout_rate=self.config.attention_probs_dropout_prob,
+                broadcast_dropout=True,
+                deterministic=deterministic,
+                dtype=self.dtype,
+                precision=None,
+                config=self.config,
+                module=self,
+            )
+            attn_output = jnp.einsum(
+                "...hqk,...khd->...qhd", attn_weights, value_states
+            )
+            attn_output = attn_output.reshape(attn_output.shape[:2] + (-1,))
+            outputs = (
+                (attn_output, attn_weights) if output_attentions else (attn_output,)
+            )
+
+        else:
+            raise ValueError(
+                f"attention_type should be one of 'sparsemax', 'softmax', 'low-rank', 'monarch', got {attention_type}"
+            )
+
         return outputs
 
 
@@ -564,7 +615,7 @@ class FlaxViTPreTrainedModel(FlaxPreTrainedModel):
             output_hidden_states,
             return_dict,
             rngs=rngs,
-            mutable="intermediates" if self.config.output_intermediates else False,
+            mutable="intermediates" if self.config.return_intermediates else False,
         )
         return outputs
 

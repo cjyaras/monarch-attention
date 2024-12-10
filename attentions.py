@@ -1,7 +1,12 @@
+"""Partially forked from https://github.com/google/flax/blob/main/flax/linen/attention.py"""
+
+from functools import partial
+from math import ceil, floor, sqrt
 from typing import Callable, Optional
 
 import jax
 import jax.numpy as jnp
+import optax
 from einshape import jax_einshape as einshape
 from flax.linen.dtypes import promote_dtype
 from flax.linen.module import Module
@@ -9,6 +14,8 @@ from flax.typing import Array, Dtype, PrecisionLike, PRNGKey
 
 from configuration_vit import ModifiedViTConfig, ViTConfig
 from projections import softmax, sparsemax
+from solvers import low_rank_solve, monarch_solve
+from utils import vmap_lift
 
 
 def dot_product_attention_weights(
@@ -27,43 +34,6 @@ def dot_product_attention_weights(
     einsum_dot_general: Callable[..., Array] = jax.lax.dot_general,
     config: Optional[ViTConfig] = None,
 ):
-    """Computes dot-product attention weights given query and key.
-
-    Used by :func:`dot_product_attention`, which is what you'll most likely use.
-    But if you want access to the attention weights for introspection, then
-    you can directly call this function and call einsum yourself.
-
-    Args:
-      query: queries for calculating attention with shape of ``[batch...,
-        q_length, num_heads, qk_depth_per_head]``.
-      key: keys for calculating attention with shape of ``[batch..., kv_length,
-        num_heads, qk_depth_per_head]``.
-      bias: bias for the attention weights. This should be broadcastable to the
-        shape ``[batch..., num_heads, q_length, kv_length]``. This can be used for
-        incorporating causal masks, padding masks, proximity bias, etc.
-      mask: mask for the attention weights. This should be broadcastable to the
-        shape ``[batch..., num_heads, q_length, kv_length]``. This can be used for
-        incorporating causal masks. Attention weights are masked out if their
-        corresponding mask value is ``False``.
-      broadcast_dropout: bool: use a broadcasted dropout along batch dims.
-      dropout_rng: JAX PRNGKey: to be used for dropout
-      dropout_rate: dropout rate
-      deterministic: bool, deterministic or not (to apply dropout)
-      dtype: the dtype of the computation (default: infer from inputs and params)
-      precision: numerical precision of the computation see ``jax.lax.Precision``
-        for details.
-      module: the Module that will sow the attention weights into the
-        'intermediates' collection. Remember to mark 'intermediates' as mutable
-        via ``mutable=['intermediates']`` in order to have that collection
-        returned. If ``module`` is None, the attention weights will not be sowed.
-      force_fp32_for_softmax: bool, whether to force the softmax to be computed in
-        fp32. This is useful for mixed-precision training where higher precision
-        is desired for numerical stability.
-      einsum_dot_general: the dot_general to use in einsum.
-
-    Returns:
-      Output of shape ``[batch..., num_heads, q_length, kv_length]``.
-    """
     query, key = promote_dtype(query, key, dtype=dtype)
     dtype = query.dtype
 
@@ -124,4 +94,77 @@ def dot_product_attention_weights(
         multiplier = keep.astype(dtype) / jnp.asarray(keep_prob, dtype=dtype)
         attn_weights = attn_weights * multiplier
 
+    return attn_weights
+
+
+def efficient_attention_weights(
+    query: Array,
+    key: Array,
+    bias: Optional[Array] = None,
+    mask: Optional[Array] = None,
+    broadcast_dropout: bool = True,
+    dropout_rng: Optional[PRNGKey] = None,
+    dropout_rate: float = 0.0,
+    deterministic: bool = False,
+    dtype: Optional[Dtype] = None,
+    module: Optional[Module] = None,
+    config: Optional[ViTConfig] = None,
+):
+    assert isinstance(config, ModifiedViTConfig)
+
+    # Make sure other arguments are appropriate (bidirectional, inference mode, no bias, etc.)
+    assert bias is None
+    assert mask is None
+    assert broadcast_dropout is True
+    assert dropout_rng is None
+    assert dropout_rate == 0.0
+    assert deterministic is True
+
+    query, key = promote_dtype(query, key, dtype=dtype)
+    dtype = query.dtype
+
+    assert query.ndim == key.ndim, "q, k must have same rank."
+    assert query.shape[:-3] == key.shape[:-3], "q, k batch dims must match."
+    assert query.shape[-2] == key.shape[-2], "q, k num_heads must match."
+    assert query.shape[-1] == key.shape[-1], "q, k depths must match."
+
+    depth = query.shape[-1]
+    query = query / jnp.sqrt(depth).astype(dtype)
+
+    if config.attention_temperature is not None:
+        query = query / config.attention_temperature
+
+    query = einshape("...qhd->...hqd", query)
+    key = einshape("...khd->...hkd", key)
+
+    if module:
+        module.sow("intermediates", "q", query)
+        module.sow("intermediates", "k", key)
+
+    n = query.shape[-2]
+
+    if config.attention_type == "low-rank":
+        solver = partial(
+            low_rank_solve,
+            num_steps=5,
+            tx=optax.adam(0.1),
+            rank=ceil(sqrt(n)),
+            return_history=False,
+        )
+    else:
+        solver = partial(
+            monarch_solve,
+            num_steps=10,
+            tx=optax.sgd(1e5),
+            block_size=floor(sqrt(n)),
+            padding_type="pre",
+            return_history=False,
+        )
+
+    attn_weights = vmap_lift(solver, query.ndim - 2, in_axes=(0, 0), out_axes=0)(
+        query, key
+    )
+    # attn_weights_e2e = vmap_lift(attn_weights.get_e2e.__func__, query.ndim - 2, 0, 0)(
+    #     attn_weights
+    # )
     return attn_weights
