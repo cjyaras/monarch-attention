@@ -20,15 +20,15 @@ image_urls = [
 ]
 
 # url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-url = image_urls[4]
+url = image_urls[0]
 image = Image.open(requests.get(url, stream=True).raw)  # type: ignore
 
 base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
 
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
-# config.attention_type = "sparsemax"
-config.attention_type = "monarch"
-config.attention_temperature = 10.0
+config.attention_type = "softmax"
+# config.attention_type = "monarch"
+# config.attention_temperature = 10.0
 config.return_intermediates = False
 
 image_processor = AutoImageProcessor.from_pretrained(

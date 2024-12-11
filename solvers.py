@@ -142,7 +142,6 @@ class Monarch(LRParameterization):
         R_params = self.R_params
         pad_amount = self.n_padded - self.n
 
-        # Issue here
         if self.padding_type == "pre":
             R_params_zeroed = R_params.at[0, :, :pad_amount].set(0.0)
         else:
