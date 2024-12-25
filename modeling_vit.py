@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
+from sparsemax import Sparsemax
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
@@ -31,7 +32,8 @@ from transformers.utils import (
     torch_int,
 )
 
-from .configuration_vit import ViTConfig
+from configuration_vit import ModifiedViTConfig, ViTConfig
+from efficient_attention_module import LowRankAttention, MonarchAttention
 
 logger = logging.get_logger(__name__)
 
@@ -233,6 +235,44 @@ class ViTSelfAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.attention_probs_dropout_prob)
 
+        # cjyaras: Modifications made here
+        assert config.attention_probs_dropout_prob == 0.0, "Dropout not supported"
+
+        assert isinstance(config, ModifiedViTConfig)
+        self.attention_type = config.attention_type
+
+        if self.attention_type == "sparsemax":
+            self.sparsemax = Sparsemax(dim=-1)
+
+        elif self.attention_type in ["low-rank", "monarch"]:
+            num_steps = config.efficient_attention_num_steps
+            step_size = config.efficient_attention_step_size
+            assert num_steps is not None and step_size is not None
+
+            if self.attention_type == "low-rank":
+                rank = config.efficient_attention_rank
+                assert rank is not None
+                self.efficient_attn = torch.compile(
+                    LowRankAttention(
+                        num_steps=num_steps, step_size=step_size, rank=rank
+                    )
+                )
+
+            else:
+                block_size = config.efficient_attention_block_size
+                pad_type = config.efficient_attention_pad_type
+                assert block_size is not None and pad_type is not None
+                self.efficient_attn = torch.compile(
+                    MonarchAttention(
+                        block_size=block_size,
+                        num_steps=num_steps,
+                        step_size=step_size,
+                        pad_type=pad_type,  # type: ignore
+                    )
+                )
+
+        self.attention_temperature = config.attention_temperature
+
     def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
         new_x_shape = x.size()[:-1] + (
             self.num_attention_heads,
@@ -253,23 +293,27 @@ class ViTSelfAttention(nn.Module):
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
-        # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        print(key_layer.shape)
 
-        attention_scores = attention_scores / math.sqrt(self.attention_head_size)
+        # cjyaras: Modifications made here
+        assert not self.training
+        assert head_mask is None
 
-        # Normalize the attention scores to probabilities.
-        attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+        if self.attention_temperature is not None:
+            query_layer = query_layer / self.attention_temperature
 
-        # This is actually dropping out entire tokens to attend to, which might
-        # seem a bit unusual, but is taken from the original Transformer paper.
-        attention_probs = self.dropout(attention_probs)
+        # Moved head dim scaling to query
+        query_layer = query_layer / math.sqrt(self.attention_head_size)
 
-        # Mask heads if we want to
-        if head_mask is not None:
-            attention_probs = attention_probs * head_mask
-
-        context_layer = torch.matmul(attention_probs, value_layer)
+        if self.attention_type in ["softmax", "sparsemax"]:
+            attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+            if self.attention_type == "sparsemax":
+                attention_probs = self.sparsemax(attention_scores)
+            else:
+                attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+            context_layer = torch.matmul(attention_probs, value_layer)
+        else:
+            context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -287,6 +331,10 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
         super().__init__(config)
         self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
 
+        # cjyaras: Modifications made here
+        assert isinstance(config, ModifiedViTConfig)
+        self.attention_type = config.attention_type
+
     def forward(
         self,
         hidden_states: torch.FloatTensor,
@@ -300,6 +348,15 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
                 "specifying the manual implementation will be required from Transformers version v5.0.0 onwards. "
                 'This warning can be removed using the argument `attn_implementation="eager"` when loading the model.'
             )
+            return super().forward(
+                hidden_states=hidden_states,
+                head_mask=head_mask,
+                output_attentions=output_attentions,
+            )
+
+        # cjyaras: Modifications made here
+        if self.attention_type != "softmax":
+            # Go back to the manual attention implementation where modifications have been made
             return super().forward(
                 hidden_states=hidden_states,
                 head_mask=head_mask,

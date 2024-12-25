@@ -84,7 +84,7 @@ class LowRankAttention(nn.Module):
         right_params = init(batch_size + (self.rank, seq_len))
 
         for _ in range(self.num_steps):
-            d_left_params, d_right_params = self.low_rank_grad(
+            d_left_params, d_right_params = self.grad(
                 left_params, right_params, query, key, seq_len
             )
             left_params = left_params - self.step_size * d_left_params
@@ -111,7 +111,7 @@ class MonarchAttention(nn.Module):
         block_size: int,
         num_steps: int,
         step_size: float,
-        pad_type: PadType = "pre",
+        pad_type: PadType,
     ):
         super().__init__()
         self.block_size = block_size
@@ -245,7 +245,7 @@ def main():
     query = torch.randn(seq_len, model_dims)
     key = torch.randn(seq_len, model_dims)
 
-    monarch_attention = torch.compile(MonarchAttention(int(2**8), 10, 5e1))
+    monarch_attention = torch.compile(MonarchAttention(int(2**8), 10, 5e1, "pre"))
     monarch_attention(query, key, query)
     start = time()
     monarch_attention(query, key, query)
