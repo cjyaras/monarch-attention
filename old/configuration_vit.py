@@ -1,6 +1,4 @@
-"""ViT model configuration.
-
-Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
+"""Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
 
 from typing import Literal, Optional
 
@@ -113,8 +111,10 @@ class ModifiedViTConfig(ViTConfig):
         self,
         attention_type: AttentionType = "softmax",
         attention_temperature: Optional[float] = None,
+        return_intermediates: bool = False,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self.attention_type = attention_type
         self.attention_temperature = attention_temperature
+        self.return_intermediates = return_intermediates
