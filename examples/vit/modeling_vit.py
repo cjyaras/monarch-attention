@@ -32,8 +32,9 @@ from transformers.utils import (
     torch_int,
 )
 
-from configuration_vit import ModifiedViTConfig, ViTConfig
-from efficient_attention_module import LowRankAttention, MonarchAttention
+from sobalib.layers import LowRankAttention, MonarchAttention
+
+from .configuration_vit import ModifiedViTConfig, ViTConfig
 
 logger = logging.get_logger(__name__)
 
@@ -252,23 +253,21 @@ class ViTSelfAttention(nn.Module):
             if self.attention_type == "low-rank":
                 rank = config.efficient_attention_rank
                 assert rank is not None
-                self.efficient_attn = torch.compile(
-                    LowRankAttention(
-                        num_steps=num_steps, step_size=step_size, rank=rank
-                    )
+                self.efficient_attn = LowRankAttention(
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    rank=rank,
                 )
 
             else:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchAttention(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    )
+                self.efficient_attn = MonarchAttention(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,  # type: ignore
                 )
 
         self.attention_temperature = config.attention_temperature
@@ -292,8 +291,6 @@ class ViTSelfAttention(nn.Module):
         key_layer = self.transpose_for_scores(self.key(hidden_states))
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        print(key_layer.shape)
 
         # cjyaras: Modifications made here
         assert not self.training

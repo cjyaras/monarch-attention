@@ -1,37 +1,20 @@
 # TODO: Gradients should be scaled so that same step size works across sequence lengths
-from math import ceil, sqrt
-from typing import Literal, Tuple
+# TODO: Currently the module is compiled at run-time, try to generate triton code
+
+from math import ceil
+from typing import Tuple
 
 import torch
 import torch.nn as nn
 from einops import rearrange
 from torch.nn.functional import normalize, pad
 
-einsum = torch.einsum
+from .utils import PadType, init, inv_norm, project
+
 Tensor = torch.Tensor
-PadType = Literal["pre", "post"]
-
-## Utility functions
 
 
-def init(shape: Tuple[int, ...], init_scale: float = 1e-3) -> Tensor:
-    """
-    Approximately initializes from projection of Dirichlet distribution with large scale parameter onto sphere.
-    Uses uniform distribution for fast sampling.
-    """
-    center = 1 / sqrt(shape[-1])
-    noise = 2 * init_scale * torch.rand(shape) - init_scale
-    return center + noise
-
-
-def project(x: Tensor, u: Tensor) -> Tensor:
-    return einsum("...i,...j,...j->...i", x, x, u)
-
-
-def inv_norm(x: Tensor) -> Tensor:
-    return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
-
-
+@torch.compile()
 class LowRankAttention(nn.Module):
 
     def __init__(self, rank: int, num_steps: int, step_size: float):
@@ -61,15 +44,15 @@ class LowRankAttention(nn.Module):
         left = left_sphere**2
         right = right_sphere**2
         d_left = (
-            einsum("...jk,...ki,...li->...jl", left, right, right)
-            - einsum("...ja,...ia,...li->...jl", query, key, right)
+            torch.einsum("...jk,...ki,...li->...jl", left, right, right)
+            - torch.einsum("...ja,...ia,...li->...jl", query, key, right)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - project(left_sphere, d_left)
         d_left = d_left * inv_norm(left_params)
         d_right = (
-            einsum("...jk,...jl,...li->...ki", left, left, right)
-            - einsum("...jk,...ja,...ia->...ki", left, query, key)
+            torch.einsum("...jk,...jl,...li->...ki", left, left, right)
+            - torch.einsum("...jk,...ja,...ia->...ki", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - project(right_sphere, d_right)
@@ -104,6 +87,7 @@ class LowRankAttention(nn.Module):
         return self.multiply(left, right, value)
 
 
+@torch.compile()
 class MonarchAttention(nn.Module):
 
     def __init__(
@@ -134,8 +118,8 @@ class MonarchAttention(nn.Module):
         pad_t = (0, 0) + (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) a -> ... k i a", i=self.block_size)
-        Y = einsum("...kji,...kia->...kja", right, X)
-        Z = einsum("...jlk,...kja->...lja", left, Y)
+        Y = torch.einsum("...kji,...kia->...kja", right, X)
+        Z = torch.einsum("...jlk,...kja->...lja", left, Y)
         z = rearrange(Z, "... l j a -> ... (l j) a")
         return (
             z[..., pad_amount:, :]
@@ -144,7 +128,7 @@ class MonarchAttention(nn.Module):
         )
 
     def get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
-        out = einsum("...jlk,...kji->...ljki", left, right)
+        out = torch.einsum("...jlk,...kji->...ljki", left, right)
         out = rearrange(out, "... l j k i -> ... (l j) (k i)")
         return out
 
@@ -170,15 +154,15 @@ class MonarchAttention(nn.Module):
         left = left_sphere**2
         right = right_sphere**2
         d_left = (
-            einsum("...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left)
-            - einsum("...kji,...lja,...kia->...jlk", right, query, key)
+            torch.einsum("...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left)
+            - torch.einsum("...kji,...lja,...kia->...jlk", right, query, key)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - project(left_sphere, d_left)
         d_left = d_left * inv_norm(left_params)
         d_right = (
-            einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
-            - einsum("...jlk,...lja,...kia->...kji", left, query, key)
+            torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
+            - torch.einsum("...jlk,...lja,...kia->...kji", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - project(right_sphere, d_right)
@@ -227,35 +211,3 @@ class MonarchAttention(nn.Module):
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
         left, right = self.get_factors(query, key)
         return self.multiply(left, right, value)
-
-
-@torch.no_grad()
-def main():
-
-    from time import time
-
-    import matplotlib.pyplot as plt
-    from sparsemax import Sparsemax
-
-    torch.manual_seed(0)
-
-    seq_len = int(2**16)
-    # seq_len = 16
-    model_dims = 64
-    query = torch.randn(seq_len, model_dims)
-    key = torch.randn(seq_len, model_dims)
-
-    monarch_attention = torch.compile(MonarchAttention(int(2**8), 10, 5e1, "pre"))
-    monarch_attention(query, key, query)
-    start = time()
-    monarch_attention(query, key, query)
-    print(time() - start)
-    exit()
-    fig, ax = plt.subplots(1, 2)
-    ax[0].imshow(Sparsemax(dim=-1)(einsum("qd,kd->qk", query, key)))
-    ax[1].imshow(monarch_attention.get_matrix(query, key))
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()

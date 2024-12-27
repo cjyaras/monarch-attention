@@ -3,22 +3,25 @@ import torch
 from PIL import Image
 from transformers import AutoImageProcessor
 
-from configuration_vit import ModifiedViTConfig, ViTConfig
-from modeling_vit import ViTForImageClassification
+from examples.vit.configuration_vit import ModifiedViTConfig, ViTConfig
+from examples.vit.modeling_vit import ViTForImageClassification
 
 url = "http://images.cocodataset.org/val2017/000000039769.jpg"
 image = Image.open(requests.get(url, stream=True).raw)  # type: ignore
 
 base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
+
 assert isinstance(config, ModifiedViTConfig)
 config.attention_type = "monarch"
 config.attention_temperature = 10.0
-config.efficient_attention_num_steps = 5
+config.efficient_attention_num_steps = 2
 config.efficient_attention_step_size = 5e5
-config.efficient_attention_block_size = 16
+config.efficient_attention_block_size = 14
 
-processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224")
+processor = AutoImageProcessor.from_pretrained(
+    "google/vit-base-patch16-224", use_fast=True
+)
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
 )

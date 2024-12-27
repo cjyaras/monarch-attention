@@ -1,9 +1,13 @@
-"""Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
+"""ViT model configuration.
+
+Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
 
 from typing import Literal, Optional
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
+
+from sobalib.utils import PadType
 
 logger = logging.get_logger(__name__)
 
@@ -111,10 +115,19 @@ class ModifiedViTConfig(ViTConfig):
         self,
         attention_type: AttentionType = "softmax",
         attention_temperature: Optional[float] = None,
-        return_intermediates: bool = False,
+        efficient_attention_num_steps: Optional[int] = None,
+        efficient_attention_step_size: Optional[float] = None,
+        efficient_attention_rank: Optional[int] = None,
+        efficient_attention_block_size: Optional[int] = None,
+        efficient_attention_pad_type: PadType = "pre",
         **kwargs,
     ):
         super().__init__(**kwargs)
+        self._attn_implementation = "sdpa"
         self.attention_type = attention_type
         self.attention_temperature = attention_temperature
-        self.return_intermediates = return_intermediates
+        self.efficient_attention_num_steps = efficient_attention_num_steps
+        self.efficient_attention_step_size = efficient_attention_step_size
+        self.efficient_attention_rank = efficient_attention_rank
+        self.efficient_attention_block_size = efficient_attention_block_size
+        self.efficient_attention_pad_type = efficient_attention_pad_type
