@@ -90,7 +90,7 @@ class ViTEmbeddings(nn.Module):
 
         # always interpolate when tracing to ensure the exported model works for dynamic input shapes
         if (
-            not torch.jit.is_tracing()
+            not torch.jit.is_tracing()  # type: ignore
             and num_patches == num_positions
             and height == width
         ):
@@ -106,7 +106,7 @@ class ViTEmbeddings(nn.Module):
 
         sqrt_num_positions = torch_int(num_positions**0.5)
         patch_pos_embed = patch_pos_embed.reshape(
-            1, sqrt_num_positions, sqrt_num_positions, dim
+            1, sqrt_num_positions, sqrt_num_positions, dim  # type: ignore
         )
         patch_pos_embed = patch_pos_embed.permute(0, 3, 1, 2)
 
@@ -134,7 +134,7 @@ class ViTEmbeddings(nn.Module):
 
         if bool_masked_pos is not None:
             seq_length = embeddings.shape[1]
-            mask_tokens = self.mask_token.expand(batch_size, seq_length, -1)
+            mask_tokens = self.mask_token.expand(batch_size, seq_length, -1)  # type: ignore
             # replace the masked visual tokens by mask_tokens
             mask = bool_masked_pos.unsqueeze(-1).type_as(mask_tokens)
             embeddings = embeddings * (1.0 - mask) + mask_tokens * mask
@@ -178,8 +178,8 @@ class ViTPatchEmbeddings(nn.Module):
             if isinstance(patch_size, collections.abc.Iterable)
             else (patch_size, patch_size)
         )
-        num_patches = (image_size[1] // patch_size[1]) * (
-            image_size[0] // patch_size[0]
+        num_patches = (image_size[1] // patch_size[1]) * (  # type: ignore
+            image_size[0] // patch_size[0]  # type: ignore
         )
         self.image_size = image_size
         self.patch_size = patch_size
@@ -187,7 +187,7 @@ class ViTPatchEmbeddings(nn.Module):
         self.num_patches = num_patches
 
         self.projection = nn.Conv2d(
-            num_channels, hidden_size, kernel_size=patch_size, stride=patch_size
+            num_channels, hidden_size, kernel_size=patch_size, stride=patch_size  # type: ignore
         )
 
     def forward(
@@ -200,10 +200,10 @@ class ViTPatchEmbeddings(nn.Module):
                 f" Expected {self.num_channels} but got {num_channels}."
             )
         if not interpolate_pos_encoding:
-            if height != self.image_size[0] or width != self.image_size[1]:
+            if height != self.image_size[0] or width != self.image_size[1]:  # type: ignore
                 raise ValueError(
                     f"Input image size ({height}*{width}) doesn't match model"
-                    f" ({self.image_size[0]}*{self.image_size[1]})."
+                    f" ({self.image_size[0]}*{self.image_size[1]})."  # type: ignore
                 )
         embeddings = self.projection(pixel_values).flatten(2).transpose(1, 2)
         return embeddings
@@ -318,11 +318,15 @@ class ViTSelfAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(new_context_layer_shape)
 
-        outputs = (
-            (context_layer, attention_probs) if output_attentions else (context_layer,)
-        )
+        assert output_attentions is False
 
-        return outputs
+        outputs = (context_layer, None)
+
+        # outputs = (
+        #     (context_layer, attention_probs) if output_attentions else (context_layer,)
+        # )
+
+        return outputs  # type: ignore
 
 
 class ViTSdpaSelfAttention(ViTSelfAttention):
@@ -337,7 +341,7 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
         output_attentions: bool = False,
     ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
         if output_attentions or head_mask is not None:
-            logger.warning_once(
+            logger.warning_once(  # type: ignore
                 "`ViTSdpaAttention` is used but `torch.nn.functional.scaled_dot_product_attention` does not support "
                 "`output_attentions=True` or `head_mask`. Falling back to the manual attention implementation, but "
                 "specifying the manual implementation will be required from Transformers version v5.0.0 onwards. "
@@ -378,7 +382,7 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(new_context_layer_shape)
 
-        return context_layer, None
+        return context_layer, None  # type: ignore
 
 
 class ViTSelfOutput(nn.Module):
@@ -412,7 +416,7 @@ class ViTAttention(nn.Module):
         if len(heads) == 0:
             return
         heads, index = find_pruneable_heads_and_indices(
-            heads,
+            heads,  # type: ignore
             self.attention.num_attention_heads,
             self.attention.attention_head_size,
             self.pruned_heads,
@@ -566,7 +570,7 @@ class ViTEncoder(nn.Module):
 
         for i, layer_module in enumerate(self.layer):
             if output_hidden_states:
-                all_hidden_states = all_hidden_states + (hidden_states,)
+                all_hidden_states = all_hidden_states + (hidden_states,)  # type: ignore
 
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
@@ -585,10 +589,10 @@ class ViTEncoder(nn.Module):
             hidden_states = layer_outputs[0]
 
             if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                all_self_attentions = all_self_attentions + (layer_outputs[1],)  # type: ignore
 
         if output_hidden_states:
-            all_hidden_states = all_hidden_states + (hidden_states,)
+            all_hidden_states = all_hidden_states + (hidden_states,)  # type: ignore
 
         if not return_dict:
             return tuple(
@@ -597,8 +601,8 @@ class ViTEncoder(nn.Module):
                 if v is not None
             )
         return BaseModelOutput(
-            last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
+            last_hidden_state=hidden_states,  # type: ignore
+            hidden_states=all_hidden_states,  # type: ignore
             attentions=all_self_attentions,
         )
 
@@ -795,7 +799,7 @@ class ViTModel(ViTPreTrainedModel):
 
         return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
+            pooler_output=pooled_output,  # type: ignore
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
@@ -928,15 +932,15 @@ class ViTForMaskedImageModeling(ViTPreTrainedModel):
         masked_im_loss = None
         if bool_masked_pos is not None:
             size = self.config.image_size // self.config.patch_size
-            bool_masked_pos = bool_masked_pos.reshape(-1, size, size)
+            bool_masked_pos = bool_masked_pos.reshape(-1, size, size)  # type: ignore
             mask = (
-                bool_masked_pos.repeat_interleave(self.config.patch_size, 1)
+                bool_masked_pos.repeat_interleave(self.config.patch_size, 1)  # type: ignore
                 .repeat_interleave(self.config.patch_size, 2)
                 .unsqueeze(1)
                 .contiguous()
             )
             reconstruction_loss = nn.functional.l1_loss(
-                pixel_values, reconstructed_pixel_values, reduction="none"
+                pixel_values, reconstructed_pixel_values, reduction="none"  # type: ignore
             )
             masked_im_loss = (
                 (reconstruction_loss * mask).sum()

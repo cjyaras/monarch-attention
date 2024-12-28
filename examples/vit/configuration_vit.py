@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
 
-from sobalib.utils import PadType
+from sobalib.layers import PadType
 
 logger = logging.get_logger(__name__)
 

@@ -1,3 +1,4 @@
+from math import sqrt
 from typing import Dict, List
 
 import requests
@@ -8,8 +9,10 @@ from transformers import AutoImageProcessor
 
 from examples.vit.configuration_vit import ModifiedViTConfig, ViTConfig
 from examples.vit.modeling_vit import ViTForImageClassification
+from sobalib.utils import calibrate_sparsemax_temperature
 
 url = "http://images.cocodataset.org/val2017/000000039769.jpg"
+url = "https://farm7.staticflickr.com/6139/6023621033_e4534f0655_z.jpg"
 image = Image.open(requests.get(url, stream=True).raw)  # type: ignore
 
 base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
@@ -59,4 +62,10 @@ inputs = processor(images=image, return_tensors="pt")
 with torch.no_grad():
     model(**inputs)
 
-print(all_layer_intermediates[0]["query"].shape)
+all_query = torch.cat(
+    [all_layer_intermediates[layer]["query"][0, :] for layer in range(1)], dim=0
+)
+all_key = torch.cat(
+    [all_layer_intermediates[layer]["key"][0, :] for layer in range(1)], dim=0
+)
+calibrate_sparsemax_temperature(all_query, all_key)

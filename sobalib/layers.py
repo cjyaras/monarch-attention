@@ -1,17 +1,35 @@
 # TODO: Gradients should be scaled so that step size is invariant w.r.t. sequence length
 # TODO: Currently the layer is compiled at run-time, try to generate triton code
 
-from math import ceil
-from typing import Tuple
+from math import ceil, sqrt
+from typing import Literal, Tuple
 
 import torch
 import torch.nn as nn
 from einops import rearrange
 from torch.nn.functional import normalize, pad
 
-from .utils import PadType, init, inv_norm, project
-
 Tensor = torch.Tensor
+
+PadType = Literal["pre", "post"]
+
+
+def _init(shape: Tuple[int, ...], init_scale: float = 1e-3) -> Tensor:
+    """
+    Approximately sample from projection of Dirichlet distribution with large scale parameter onto sphere.
+    Uses uniform distribution for fast sampling.
+    """
+    center = 1 / sqrt(shape[-1])
+    noise = 2 * init_scale * torch.rand(shape) - init_scale
+    return center + noise
+
+
+def _project(x: Tensor, u: Tensor) -> Tensor:
+    return torch.einsum("...i,...j,...j->...i", x, x, u)
+
+
+def _inv_norm(x: Tensor) -> Tensor:
+    return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
 
 
 @torch.compile()
@@ -48,23 +66,23 @@ class LowRankAttention(nn.Module):
             - torch.einsum("...ja,...ia,...li->...jl", query, key, right)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
-        d_left = d_left - project(left_sphere, d_left)
-        d_left = d_left * inv_norm(left_params)
+        d_left = d_left - _project(left_sphere, d_left)
+        d_left = d_left * _inv_norm(left_params)
         d_right = (
             torch.einsum("...jk,...jl,...li->...ki", left, left, right)
             - torch.einsum("...jk,...ja,...ia->...ki", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
-        d_right = d_right - project(right_sphere, d_right)
-        d_right = d_right * inv_norm(right_params)
+        d_right = d_right - _project(right_sphere, d_right)
+        d_right = d_right * _inv_norm(right_params)
         return d_left, d_right
 
     def get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
         batch_size = query.shape[:-2]
         seq_len = query.shape[-2]
 
-        left_params = init(batch_size + (seq_len, self.rank))
-        right_params = init(batch_size + (self.rank, seq_len))
+        left_params = _init(batch_size + (seq_len, self.rank))
+        right_params = _init(batch_size + (self.rank, seq_len))
 
         for _ in range(self.num_steps):
             d_left_params, d_right_params = self.grad(
@@ -158,15 +176,15 @@ class MonarchAttention(nn.Module):
             - torch.einsum("...kji,...lja,...kia->...jlk", right, query, key)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
-        d_left = d_left - project(left_sphere, d_left)
-        d_left = d_left * inv_norm(left_params)
+        d_left = d_left - _project(left_sphere, d_left)
+        d_left = d_left * _inv_norm(left_params)
         d_right = (
             torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
             - torch.einsum("...jlk,...lja,...kia->...kji", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
-        d_right = d_right - project(right_sphere, d_right)
-        d_right = d_right * inv_norm(right_params)
+        d_right = d_right - _project(right_sphere, d_right)
+        d_right = d_right * _inv_norm(right_params)
         return d_left, d_right
 
     def get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
@@ -181,8 +199,10 @@ class MonarchAttention(nn.Module):
         query = rearrange(query, "... (l j) a -> ... l j a", j=self.block_size)
         key = rearrange(key, "... (k i) a -> ... k i a", i=self.block_size)
 
-        left_params = init(batch_size + (self.block_size, num_blocks, num_blocks))
-        right_params = init(batch_size + (num_blocks, self.block_size, self.block_size))
+        left_params = _init(batch_size + (self.block_size, num_blocks, num_blocks))
+        right_params = _init(
+            batch_size + (num_blocks, self.block_size, self.block_size)
+        )
 
         for _ in range(self.num_steps):
             d_left_params, d_right_params = self.grad(

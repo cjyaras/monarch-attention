@@ -1,26 +1,28 @@
-from math import sqrt
-from typing import Literal, Tuple
+from math import inf, sqrt
 
+import matplotlib.pyplot as plt
 import torch
+from sparsemax import Sparsemax
+from torch.nn.functional import softmax
 
 Tensor = torch.Tensor
 
-PadType = Literal["pre", "post"]
 
-
-def init(shape: Tuple[int, ...], init_scale: float = 1e-3) -> Tensor:
-    """
-    Approximately initializes from projection of Dirichlet distribution with large scale parameter onto sphere.
-    Uses uniform distribution for fast sampling.
-    """
-    center = 1 / sqrt(shape[-1])
-    noise = 2 * init_scale * torch.rand(shape) - init_scale
-    return center + noise
-
-
-def project(x: Tensor, u: Tensor) -> Tensor:
-    return torch.einsum("...i,...j,...j->...i", x, x, u)
-
-
-def inv_norm(x: Tensor) -> Tensor:
-    return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
+def calibrate_sparsemax_temperature(query: Tensor, key: Tensor):
+    # query: [total_num_heads, seq_len, dim_per_head]
+    # key: [total_num_heads, seq_len, dim_per_head]
+    sparsemax = Sparsemax()
+    attention_temperature_vals = torch.logspace(0, 2, 100)
+    attn_weights = query @ key.transpose(-1, -2) / sqrt(query.size(-1))
+    softmax_attn_weights = softmax(attn_weights, dim=-1)[:, None, :, :]
+    sparsemax_attn_weights = sparsemax(
+        attn_weights[:, None, :, :] / attention_temperature_vals[None, :, None, None]
+    )
+    attn_weights_diff = softmax_attn_weights - sparsemax_attn_weights
+    attn_weights_diff = attn_weights_diff.reshape(
+        query.shape[0], attention_temperature_vals.shape[0], -1
+    )
+    differences = torch.linalg.norm(attn_weights_diff, ord=inf, dim=-1)
+    plt.tight_layout()
+    plt.semilogx(attention_temperature_vals, differences.T, alpha=0.5)
+    plt.show()

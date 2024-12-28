@@ -11,9 +11,11 @@ version = "0.0.1"
 dependencies = [
     "torch",
     "torchvision",
+    "torchtnt",
     "einops",
     "transformers",
     "sparsemax",
+    "matplotlib",
 ]
 requires-python = ">=3.11"
 authors = [
