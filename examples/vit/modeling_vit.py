@@ -304,12 +304,14 @@ class ViTSelfAttention(nn.Module):
 
         if self.attention_type in ["softmax", "sparsemax"]:
             attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-            if self.attention_type == "sparsemax":
-                attention_probs = self.sparsemax(attention_scores)
-            else:
-                attention_probs = nn.functional.softmax(attention_scores, dim=-1)
+            attention_probs = (
+                self.sparsemax(attention_scores)
+                if self.attention_type == "sparsemax"
+                else nn.functional.softmax(attention_scores, dim=-1)
+            )
             context_layer = torch.matmul(attention_probs, value_layer)
         else:
+            assert output_attentions is False
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
@@ -327,10 +329,6 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
     def __init__(self, config: ViTConfig) -> None:
         super().__init__(config)
         self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
-
-        # cjyaras: Modifications made here
-        assert isinstance(config, ModifiedViTConfig)
-        self.attention_type = config.attention_type
 
     def forward(
         self,
@@ -352,7 +350,7 @@ class ViTSdpaSelfAttention(ViTSelfAttention):
             )
 
         # cjyaras: Modifications made here
-        if self.attention_type != "softmax":
+        if self.attention_type != "softmax" or self.attention_temperature is not None:
             # Go back to the manual attention implementation where modifications have been made
             return super().forward(
                 hidden_states=hidden_states,

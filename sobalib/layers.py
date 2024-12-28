@@ -1,5 +1,5 @@
-# TODO: Gradients should be scaled so that same step size works across sequence lengths
-# TODO: Currently the module is compiled at run-time, try to generate triton code
+# TODO: Gradients should be scaled so that step size is invariant w.r.t. sequence length
+# TODO: Currently the layer is compiled at run-time, try to generate triton code
 
 from math import ceil
 from typing import Tuple
