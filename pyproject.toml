@@ -12,6 +12,7 @@ dependencies = [
     "torch",
     "torchvision",
     "torchtnt",
+    "opt_einsum",
     "einops",
     "transformers",
     "sparsemax",

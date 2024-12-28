@@ -7,19 +7,22 @@ from transformers import AutoImageProcessor
 from examples.vit.configuration_vit import ModifiedViTConfig, ViTConfig
 from examples.vit.modeling_vit import ViTForImageClassification
 
-# url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-url = "https://farm7.staticflickr.com/6139/6023621033_e4534f0655_z.jpg"
+# url = "https://farm7.staticflickr.com/6140/5926597200_ae3122bcaa_z.jpg"
+url = "https://farm3.staticflickr.com/2826/9688908056_22512acdaf_z.jpg"
 image = Image.open(requests.get(url, stream=True).raw)  # type: ignore
 
 base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
 
-# assert isinstance(config, ModifiedViTConfig)
-# config.attention_type = "monarch"
-# config.attention_temperature = 10.0
-# config.efficient_attention_num_steps = 2
-# config.efficient_attention_step_size = 5e5
-# config.efficient_attention_block_size = 14
+assert isinstance(config, ModifiedViTConfig)
+# config.attention_type = "low-rank"
+# config.attention_type = "sparsemax"
+config.attention_type = "monarch"
+config.attention_temperature = 10.0
+config.efficient_attention_num_steps = 2
+config.efficient_attention_step_size = 4e5
+config.efficient_attention_block_size = 14
+config.efficient_attention_rank = 14
 
 processor = AutoImageProcessor.from_pretrained(
     "google/vit-base-patch16-224", use_fast=True
@@ -34,7 +37,7 @@ inputs = processor(images=image, return_tensors="pt")
 with FlopTensorDispatchMode(model) as ftdm:
     with torch.no_grad():
         logits = model(**inputs).logits
-    print(ftdm.flop_counts["vit.encoder.layer.2.attention.attention"])
+    print(ftdm.flop_counts["vit.encoder.layer.0.attention"])
 
 predicted_label = logits.argmax(-1).item()
 print(model.config.id2label[predicted_label])
