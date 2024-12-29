@@ -4,8 +4,11 @@ To test on a few images, run
 ```
 python examples/vit/test_monarch.py
 ```
-from the top directory. Expected output:
+from the top directory. Expected output (on CPU):
 ```
+Softmax attention time: 0.25s
+Monarch attention time: 0.62s
+
 URL: http://images.cocodataset.org/val2017/000000039769.jpg
 Softmax: Egyptian cat | Monarch: Egyptian cat
 

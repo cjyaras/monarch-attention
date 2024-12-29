@@ -1,3 +1,5 @@
+from time import time
+
 import requests
 import torch
 from PIL import Image
@@ -30,6 +32,13 @@ config._attn_implementation = "eager"
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
 )
+
+with torch.no_grad():
+    model(**inputs)
+    start = time()
+    model(**inputs)
+    print(f"Softmax attention time: {time() - start:.2f}s")
+
 with FlopTensorDispatchMode(model) as ftdm:
     with torch.no_grad():
         logits = model(**inputs).logits
@@ -38,6 +47,7 @@ with FlopTensorDispatchMode(model) as ftdm:
 
 # Monarch sparsemax attention
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
+assert isinstance(config, ModifiedViTConfig)
 config.attention_type = "monarch"
 config.attention_temperature = 10.0
 config.efficient_attention_num_steps = 2
@@ -46,6 +56,13 @@ config.efficient_attention_block_size = 14
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
 )
+
+with torch.no_grad():
+    model(**inputs)
+    start = time()
+    model(**inputs)
+    print(f"Monarch attention time: {time() - start:.2f}s")
+    print()
 
 with FlopTensorDispatchMode(model) as ftdm:
     with torch.no_grad():

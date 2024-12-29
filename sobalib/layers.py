@@ -1,8 +1,5 @@
-# TODO: Gradients should be scaled so that step size is invariant w.r.t. sequence length
-# TODO: Currently the layer is compiled at run-time, try to generate triton code
-
 from math import ceil, sqrt
-from typing import Literal, Tuple
+from typing import Literal, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -14,14 +11,20 @@ Tensor = torch.Tensor
 PadType = Literal["pre", "post"]
 
 
-def _init(shape: Tuple[int, ...], init_scale: float = 1e-3) -> Tensor:
+def _init(
+    shape: Tuple[int, ...],
+    perturb_scale: Optional[float] = None,
+) -> Tensor:
     """
     Approximately sample from projection of Dirichlet distribution with large scale parameter onto sphere.
     Uses uniform distribution for fast sampling.
     """
     center = 1 / sqrt(shape[-1])
-    noise = 2 * init_scale * torch.rand(shape) - init_scale
-    return center + noise
+    if perturb_scale is not None:
+        noise = 2 * perturb_scale * torch.rand(shape) - perturb_scale
+        return center + noise
+    else:
+        return center * torch.ones(shape)
 
 
 def _project(x: Tensor, u: Tensor) -> Tensor:
@@ -32,7 +35,7 @@ def _inv_norm(x: Tensor) -> Tensor:
     return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
 
 
-@torch.compile()
+@torch.compile
 class LowRankAttention(nn.Module):
 
     def __init__(self, rank: int, num_steps: int, step_size: float):
@@ -81,8 +84,9 @@ class LowRankAttention(nn.Module):
         batch_size = query.shape[:-2]
         seq_len = query.shape[-2]
 
-        left_params = _init(batch_size + (seq_len, self.rank))
-        right_params = _init(batch_size + (self.rank, seq_len))
+        # Need small perturbation to break symmetry
+        left_params = _init(batch_size + (seq_len, self.rank), perturb_scale=1e-3)
+        right_params = _init(batch_size + (self.rank, seq_len), perturb_scale=1e-3)
 
         for _ in range(self.num_steps):
             d_left_params, d_right_params = self.grad(
@@ -105,7 +109,8 @@ class LowRankAttention(nn.Module):
         return self.multiply(left, right, value)
 
 
-@torch.compile()
+# This is not the most efficient implementation, see https://github.com/HazyResearch/fly/blob/74cc6b14347b4edcf5c49098e80a9ef47c0b21bf/src/models/layers/blockdiag_butterfly_multiply.py#L48
+@torch.compile
 class MonarchAttention(nn.Module):
 
     def __init__(
@@ -136,8 +141,8 @@ class MonarchAttention(nn.Module):
         pad_t = (0, 0) + (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) a -> ... k i a", i=self.block_size)
-        Y = torch.einsum("...kji,...kia->...kja", right, X)
-        Z = torch.einsum("...jlk,...kja->...lja", left, Y)
+        Y = torch.einsum("...kji,...kia->...kja", right, X)  # incrementing over i
+        Z = torch.einsum("...jlk,...kja->...lja", left, Y)  # incrementing over k
         z = rearrange(Z, "... l j a -> ... (l j) a")
         return (
             z[..., pad_amount:, :]
