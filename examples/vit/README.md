@@ -2,9 +2,9 @@ Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLO
 
 To test on a few images, run
 ```
-python examples/vit/test_monarch.py
+python vit/test_monarch.py
 ```
-from the top directory. Expected output (on CPU):
+from the examples directory. Expected output (on CPU):
 ```
 Softmax attention time: 0.21s
 Monarch attention time: 0.56s
