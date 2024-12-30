@@ -6,26 +6,18 @@ python examples/vit/test_monarch.py
 ```
 from the top directory. Expected output (on CPU):
 ```
-Softmax attention time: 0.25s
-Monarch attention time: 0.62s
+Softmax attention time: 0.21s
+Monarch attention time: 0.56s
 
-URL: http://images.cocodataset.org/val2017/000000039769.jpg
-Softmax: Egyptian cat | Monarch: Egyptian cat
+Softmax: ['coucal', 'magpie', 'kite', 'bee eater', 'red wolf, maned wolf, Canis rufus, Canis niger'] | Monarch: ['coucal', 'bee eater', 'jacamar', 'bulbul', 'agama'] | True: coucal
 
-URL: https://farm7.staticflickr.com/6139/6023621033_e4534f0655_z.jpg
-Softmax: airliner | Monarch: airliner
+Softmax: ['Mexican hairless', 'Italian greyhound', 'Doberman, Doberman pinscher', 'Great Dane', 'Weimaraner'] | Monarch: ['Mexican hairless', 'Italian greyhound', 'Weimaraner', 'Great Dane', 'whippet'] | True: Italian greyhound
 
-URL: https://farm4.staticflickr.com/3699/8943306698_ca46820139_z.jpg
-Softmax: tennis ball | Monarch: tennis ball
+Softmax: ['valley, vale', 'alp', 'lakeside, lakeshore', 'volcano', 'sandbar, sand bar'] | Monarch: ['valley, vale', 'sandbar, sand bar', 'lakeside, lakeshore', 'alp', 'dam, dike, dyke'] | True: volcano
 
-URL: https://farm3.staticflickr.com/2826/9688908056_22512acdaf_z.jpg
-Softmax: plate | Monarch: plate
+Softmax: ['Welsh springer spaniel', 'Sussex spaniel', 'English springer, English springer spaniel', 'clumber, clumber spaniel', 'Brittany spaniel'] | Monarch: ['Welsh springer spaniel', 'Blenheim spaniel', 'Brittany spaniel', 'papillon', 'cocker spaniel, English cocker spaniel, cocker'] | True: Welsh springer spaniel
 
-URL: https://farm2.staticflickr.com/1349/4610248959_30c464a5b6_z.jpg
-Softmax: bagel, beigel | Monarch: bagel, beigel
+Softmax: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'house finch, linnet, Carpodacus mexicanus'] | Monarch: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'bulbul'] | True: chickadee
 
-URL: https://farm7.staticflickr.com/6140/5926597200_ae3122bcaa_z.jpg
-Softmax: lakeside, lakeshore | Monarch: lakeside, lakeshore
-
-Monarch to Softmax FLOP ratio: 1.41e+08/3.58e+08 (39.48%)
+Monarch to Softmax FLOP ratio: 1.18e+08/2.98e+08 (39.48%)
 ```

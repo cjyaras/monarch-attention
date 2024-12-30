@@ -15,10 +15,6 @@ def _init(
     shape: Tuple[int, ...],
     perturb_scale: Optional[float] = None,
 ) -> Tensor:
-    """
-    Approximately sample from projection of Dirichlet distribution with large scale parameter onto sphere.
-    Uses uniform distribution for fast sampling.
-    """
     center = 1 / sqrt(shape[-1])
     if perturb_scale is not None:
         noise = 2 * perturb_scale * torch.rand(shape) - perturb_scale
@@ -35,7 +31,6 @@ def _inv_norm(x: Tensor) -> Tensor:
     return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
 
 
-@torch.compile
 class LowRankAttention(nn.Module):
 
     def __init__(self, rank: int, num_steps: int, step_size: float):
@@ -109,8 +104,6 @@ class LowRankAttention(nn.Module):
         return self.multiply(left, right, value)
 
 
-# This is not the most efficient implementation, see https://github.com/HazyResearch/fly/blob/74cc6b14347b4edcf5c49098e80a9ef47c0b21bf/src/models/layers/blockdiag_butterfly_multiply.py#L48
-@torch.compile
 class MonarchAttention(nn.Module):
 
     def __init__(
@@ -141,8 +134,8 @@ class MonarchAttention(nn.Module):
         pad_t = (0, 0) + (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) a -> ... k i a", i=self.block_size)
-        Y = torch.einsum("...kji,...kia->...kja", right, X)  # incrementing over i
-        Z = torch.einsum("...jlk,...kja->...lja", left, Y)  # incrementing over k
+        Y = torch.einsum("...kji,...kia->...kja", right, X)
+        Z = torch.einsum("...jlk,...kja->...lja", left, Y)
         z = rearrange(Z, "... l j a -> ... (l j) a")
         return (
             z[..., pad_amount:, :]

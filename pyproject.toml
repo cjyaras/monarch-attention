@@ -10,13 +10,9 @@ name = "soba"
 version = "0.0.1"
 dependencies = [
     "torch",
-    "torchvision",
-    "torchtnt",
     "opt_einsum",
     "einops",
-    "transformers",
     "sparsemax",
-    "matplotlib",
 ]
 requires-python = ">=3.11"
 authors = [

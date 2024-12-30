@@ -6,9 +6,9 @@ import torch
 import torch.nn as nn
 from PIL import Image
 from transformers import AutoImageProcessor
+from vit.configuration_vit import ModifiedViTConfig, ViTConfig
+from vit.modeling_vit import ViTForImageClassification
 
-from examples.vit.configuration_vit import ModifiedViTConfig, ViTConfig
-from examples.vit.modeling_vit import ViTForImageClassification
 from sobalib.utils import calibrate_sparsemax_temperature
 
 url = "http://images.cocodataset.org/val2017/000000039769.jpg"
