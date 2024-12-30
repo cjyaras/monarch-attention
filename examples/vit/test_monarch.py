@@ -73,7 +73,7 @@ for i in range(len(images)):
         model.config.id2label[int(monarch_labels[i, j].item())] for j in range(k)
     ]
     print(
-        f"Softmax: {softmax_string_labels} | Monarch: {monarch_string_labels} | True: {model.config.id2label[labels[i]]}"
+        f"Softmax: {softmax_string_labels}\nMonarch: {monarch_string_labels}\nTrue: {model.config.id2label[labels[i]]}"
     )
     print()
 

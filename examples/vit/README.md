@@ -6,18 +6,28 @@ python examples/vit/test_monarch.py
 ```
 from the top directory. Expected output (on CPU):
 ```
-Softmax attention time: 0.21s
-Monarch attention time: 0.56s
+Softmax attention time: 0.27s
+Monarch attention time: 0.77s
 
-Softmax: ['coucal', 'magpie', 'kite', 'bee eater', 'red wolf, maned wolf, Canis rufus, Canis niger'] | Monarch: ['coucal', 'bee eater', 'jacamar', 'bulbul', 'agama'] | True: coucal
+Softmax: ['coucal', 'magpie', 'kite', 'bee eater', 'red wolf, maned wolf, Canis rufus, Canis niger']
+Monarch: ['coucal', 'bee eater', 'jacamar', 'bulbul', 'agama']
+True: coucal
 
-Softmax: ['Mexican hairless', 'Italian greyhound', 'Doberman, Doberman pinscher', 'Great Dane', 'Weimaraner'] | Monarch: ['Mexican hairless', 'Italian greyhound', 'Weimaraner', 'Great Dane', 'whippet'] | True: Italian greyhound
+Softmax: ['Mexican hairless', 'Italian greyhound', 'Doberman, Doberman pinscher', 'Great Dane', 'Weimaraner']
+Monarch: ['Mexican hairless', 'Italian greyhound', 'Weimaraner', 'Great Dane', 'whippet']
+True: Italian greyhound
 
-Softmax: ['valley, vale', 'alp', 'lakeside, lakeshore', 'volcano', 'sandbar, sand bar'] | Monarch: ['valley, vale', 'sandbar, sand bar', 'lakeside, lakeshore', 'alp', 'dam, dike, dyke'] | True: volcano
+Softmax: ['valley, vale', 'alp', 'lakeside, lakeshore', 'volcano', 'sandbar, sand bar']
+Monarch: ['valley, vale', 'sandbar, sand bar', 'lakeside, lakeshore', 'alp', 'dam, dike, dyke']
+True: volcano
 
-Softmax: ['Welsh springer spaniel', 'Sussex spaniel', 'English springer, English springer spaniel', 'clumber, clumber spaniel', 'Brittany spaniel'] | Monarch: ['Welsh springer spaniel', 'Blenheim spaniel', 'Brittany spaniel', 'papillon', 'cocker spaniel, English cocker spaniel, cocker'] | True: Welsh springer spaniel
+Softmax: ['Welsh springer spaniel', 'Sussex spaniel', 'English springer, English springer spaniel', 'clumber, clumber spaniel', 'Brittany spaniel']
+Monarch: ['Welsh springer spaniel', 'Blenheim spaniel', 'Brittany spaniel', 'papillon', 'cocker spaniel, English cocker spaniel, cocker']
+True: Welsh springer spaniel
 
-Softmax: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'house finch, linnet, Carpodacus mexicanus'] | Monarch: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'bulbul'] | True: chickadee
+Softmax: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'house finch, linnet, Carpodacus mexicanus']
+Monarch: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'bulbul']
+True: chickadee
 
 Monarch to Softmax FLOP ratio: 1.18e+08/2.98e+08 (39.48%)
 ```
