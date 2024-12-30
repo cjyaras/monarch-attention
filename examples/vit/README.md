@@ -1,10 +1,10 @@
-Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLOPs in the **attention operation** by roughly 60% with no loss in accuracy and without any additional training. 
+Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLOPs in the **attention operation** by roughly 60% with little to no loss in accuracy and without any additional training. 
 
 To test on a few images, run
 ```
-python examples/vit/test_monarch.py
+python vit/test_monarch.py
 ```
-from the top directory. Expected output (on CPU):
+from the examples directory. Expected output (on CPU):
 ```
 Softmax attention time: 0.27s
 Monarch attention time: 0.77s
