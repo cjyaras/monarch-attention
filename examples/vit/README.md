@@ -1,4 +1,4 @@
-Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLOPs in the **attention operation** by roughly 60% with little to no loss in accuracy and without any additional training. Even for relatively short sequences, we get a roughly 18% speed-up in inference.
+Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLOPs in the **attention operation** by roughly 60% with little to no loss in accuracy and without any additional training.
 
 To test on a few images, run
 ```
