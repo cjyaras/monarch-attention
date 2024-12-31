@@ -82,8 +82,12 @@ class LowRankAttention(nn.Module):
         seq_len = query.shape[-2]
 
         # Need small perturbation to break symmetry
-        left_params = _init(batch_size + (seq_len, self.rank), perturb_scale=1e-3)
-        right_params = _init(batch_size + (self.rank, seq_len), perturb_scale=1e-3)
+        left_params = _init(
+            batch_size + (seq_len, self.rank), perturb_scale=1e-3, device=query.device
+        )
+        right_params = _init(
+            batch_size + (self.rank, seq_len), perturb_scale=1e-3, device=query.device
+        )
 
         for _ in range(self.num_steps):
             d_left_params, d_right_params = self.grad(
@@ -199,9 +203,12 @@ class MonarchAttention(nn.Module):
         query = rearrange(query, "... (l j) a -> ... l j a", j=self.block_size)
         key = rearrange(key, "... (k i) a -> ... k i a", i=self.block_size)
 
-        left_params = _init(batch_size + (self.block_size, num_blocks, num_blocks))
+        left_params = _init(
+            batch_size + (self.block_size, num_blocks, num_blocks), device=query.device
+        )
         right_params = _init(
-            batch_size + (num_blocks, self.block_size, self.block_size)
+            batch_size + (num_blocks, self.block_size, self.block_size),
+            device=query.device,
         )
 
         for _ in range(self.num_steps):

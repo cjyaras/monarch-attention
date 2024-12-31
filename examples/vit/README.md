@@ -4,10 +4,10 @@ To test on a few images, run
 ```
 python vit/monarch_vit_example.py
 ```
-from the examples directory. Expected output (on CPU):
+from the examples directory. Expected output (on colab CPU):
 ```
-Softmax attention time: 0.24s
-Monarch attention time: 0.58s
+Softmax attention time: 3.29s
+Monarch attention time: 3.34s
 
 Softmax: ['coucal', 'magpie', 'kite', 'bee eater', 'red wolf, maned wolf, Canis rufus, Canis niger']
 Monarch: ['coucal', 'hornbill', 'bee eater', 'agama', 'frilled lizard, Chlamydosaurus kingi']
