@@ -17,6 +17,7 @@ dependencies = [
     "torchtnt",
     "transformers",
     "datasets",
+    "matplotlib",
     "soba @ file://{root}/../",
 ]
 requires-python = ">=3.11"

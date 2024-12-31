@@ -210,7 +210,7 @@ class ViTPatchEmbeddings(nn.Module):
 
 
 class ViTSelfAttention(nn.Module):
-    def __init__(self, config: ViTConfig) -> None:
+    def __init__(self, config: ViTConfig, layer_num: int) -> None:
         super().__init__()
         if config.hidden_size % config.num_attention_heads != 0 and not hasattr(
             config, "embedding_size"
@@ -270,7 +270,25 @@ class ViTSelfAttention(nn.Module):
                     pad_type=pad_type,  # type: ignore
                 )
 
-        self.attention_temperature = config.attention_temperature
+        attention_temperature = config.attention_temperature
+
+        if attention_temperature is not None:
+            if isinstance(attention_temperature, float):
+                attention_temperature_array = torch.full(
+                    (self.num_attention_heads,), attention_temperature
+                )
+            elif isinstance(attention_temperature, List):
+                attention_temperature_array = torch.tensor(
+                    attention_temperature[layer_num]
+                )
+            else:
+                raise ValueError(
+                    f"Invalid type for attention_temperature: {type(attention_temperature)}"
+                )
+            attention_temperature_array = attention_temperature_array[..., None, None]
+            self.attention_temperature = attention_temperature_array
+        else:
+            self.attention_temperature = None
 
     def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
         new_x_shape = x.size()[:-1] + (
@@ -330,8 +348,8 @@ class ViTSelfAttention(nn.Module):
 
 
 class ViTSdpaSelfAttention(ViTSelfAttention):
-    def __init__(self, config: ViTConfig) -> None:
-        super().__init__(config)
+    def __init__(self, config: ViTConfig, layer_num: int) -> None:
+        super().__init__(config, layer_num)
         self.attention_probs_dropout_prob = config.attention_probs_dropout_prob
 
     def forward(
@@ -406,9 +424,9 @@ class ViTSelfOutput(nn.Module):
 
 
 class ViTAttention(nn.Module):
-    def __init__(self, config: ViTConfig) -> None:
+    def __init__(self, config: ViTConfig, layer_num: int) -> None:
         super().__init__()
-        self.attention = ViTSelfAttention(config)
+        self.attention = ViTSelfAttention(config, layer_num)
         self.output = ViTSelfOutput(config)
         self.pruned_heads = set()
 
@@ -454,9 +472,9 @@ class ViTAttention(nn.Module):
 
 
 class ViTSdpaAttention(ViTAttention):
-    def __init__(self, config: ViTConfig) -> None:
-        super().__init__(config)
-        self.attention = ViTSdpaSelfAttention(config)
+    def __init__(self, config: ViTConfig, layer_num) -> None:
+        super().__init__(config, layer_num)
+        self.attention = ViTSdpaSelfAttention(config, layer_num)
 
 
 class ViTIntermediate(nn.Module):
@@ -501,11 +519,13 @@ VIT_ATTENTION_CLASSES = {
 class ViTLayer(nn.Module):
     """This corresponds to the Block class in the timm implementation."""
 
-    def __init__(self, config: ViTConfig) -> None:
+    def __init__(self, config: ViTConfig, layer_num: int) -> None:
         super().__init__()
         self.chunk_size_feed_forward = config.chunk_size_feed_forward
         self.seq_len_dim = 1
-        self.attention = VIT_ATTENTION_CLASSES[config._attn_implementation](config)
+        self.attention = VIT_ATTENTION_CLASSES[config._attn_implementation](
+            config, layer_num
+        )
         self.intermediate = ViTIntermediate(config)
         self.output = ViTOutput(config)
         self.layernorm_before = nn.LayerNorm(
@@ -553,7 +573,10 @@ class ViTEncoder(nn.Module):
         super().__init__()
         self.config = config
         self.layer = nn.ModuleList(
-            [ViTLayer(config) for _ in range(config.num_hidden_layers)]
+            [
+                ViTLayer(config, layer_num)
+                for layer_num in range(config.num_hidden_layers)
+            ]
         )
         self.gradient_checkpointing = False
 

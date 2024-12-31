@@ -2,7 +2,7 @@
 
 Forked from https://github.com/huggingface/transformers/blob/main/src/transformers/models/vit/configuration_vit.py."""
 
-from typing import Literal, Optional
+from typing import List, Literal, Optional, Union
 
 from transformers.configuration_utils import PretrainedConfig
 from transformers.utils import logging
@@ -114,7 +114,7 @@ class ModifiedViTConfig(ViTConfig):
     def __init__(
         self,
         attention_type: AttentionType = "softmax",
-        attention_temperature: Optional[float] = None,
+        attention_temperature: Optional[Union[float, List[List[float]]]] = None,
         efficient_attention_num_steps: Optional[int] = None,
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,

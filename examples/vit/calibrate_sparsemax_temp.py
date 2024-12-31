@@ -1,26 +1,26 @@
-from math import sqrt
 from typing import Dict, List
 
-import requests
+import numpy as np
 import torch
 import torch.nn as nn
-from PIL import Image
+from datasets import load_dataset
+from datasets.iterable_dataset import IterableDataset
 from transformers import AutoImageProcessor
 from vit.configuration_vit import ModifiedViTConfig, ViTConfig
 from vit.modeling_vit import ViTForImageClassification
 
 from sobalib.utils import calibrate_sparsemax_temperature
 
-url = "http://images.cocodataset.org/val2017/000000039769.jpg"
-url = "https://farm7.staticflickr.com/6139/6023621033_e4534f0655_z.jpg"
-image = Image.open(requests.get(url, stream=True).raw)  # type: ignore
+ds = load_dataset("imagenet-1k", split="validation", streaming=True)
+assert isinstance(ds, IterableDataset)
+ds_examples = ds.take(5)
+images = [item["image"] for item in ds_examples]
+image_processor = AutoImageProcessor.from_pretrained(
+    "google/vit-base-patch16-224", use_fast=True
+)
 
 base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
-
-processor = AutoImageProcessor.from_pretrained(
-    "google/vit-base-patch16-224", use_fast=True
-)
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
 )
@@ -57,15 +57,20 @@ def register_qk_hook(
 all_layer_intermediates = [{} for _ in range(config.num_hidden_layers)]
 register_qk_hook(model, all_layer_intermediates)
 
-inputs = processor(images=image, return_tensors="pt")
+inputs = image_processor(images=images, return_tensors="pt")
 
 with torch.no_grad():
     model(**inputs)
 
-all_query = torch.cat(
-    [all_layer_intermediates[layer]["query"][0, :] for layer in range(1)], dim=0
+query = torch.stack(
+    [layer_intermediates["query"] for layer_intermediates in all_layer_intermediates],
+    dim=0,
+).transpose(1, 0)
+key = torch.stack(
+    [layer_intermediates["key"] for layer_intermediates in all_layer_intermediates],
+    dim=0,
+).transpose(1, 0)
+optimal_temperature = calibrate_sparsemax_temperature(
+    query, key, torch.linspace(1, 20, 40)
 )
-all_key = torch.cat(
-    [all_layer_intermediates[layer]["key"][0, :] for layer in range(1)], dim=0
-)
-calibrate_sparsemax_temperature(all_query, all_key)
+np.savetxt("vit/optimal_temperature.txt", optimal_temperature.numpy())

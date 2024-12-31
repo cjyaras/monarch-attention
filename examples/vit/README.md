@@ -2,7 +2,7 @@ Applying Monarch-structured attention to base ViT on ImageNet, we can reduce FLO
 
 To test on a few images, run
 ```
-python vit/test_monarch.py
+python vit/monarch_vit_example.py
 ```
 from the examples directory. Expected output (on CPU):
 ```

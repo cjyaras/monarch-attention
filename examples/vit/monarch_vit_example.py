@@ -1,5 +1,6 @@
 from time import time
 
+import numpy as np
 import torch
 from datasets import load_dataset
 from datasets.iterable_dataset import IterableDataset
@@ -44,7 +45,8 @@ with FlopTensorDispatchMode(model) as ftdm:
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
 assert isinstance(config, ModifiedViTConfig)
 config.attention_type = "monarch"
-config.attention_temperature = 10.0
+# config.attention_temperature = 10.0
+config.attention_temperature = np.loadtxt("vit/optimal_temperature.txt").tolist()  # type: ignore
 config.efficient_attention_num_steps = 2
 config.efficient_attention_step_size = 4e5
 config.efficient_attention_block_size = 14
