@@ -286,7 +286,10 @@ class ViTSelfAttention(nn.Module):
                     f"Invalid type for attention_temperature: {type(attention_temperature)}"
                 )
             attention_temperature_array = attention_temperature_array[..., None, None]
-            self.attention_temperature = attention_temperature_array
+            # self.attention_temperature = attention_temperature_array
+            self.register_buffer(
+                "attention_temperature", attention_temperature_array, persistent=False
+            )
         else:
             self.attention_temperature = None
 

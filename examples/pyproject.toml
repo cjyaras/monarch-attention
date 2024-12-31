@@ -20,5 +20,5 @@ dependencies = [
     "matplotlib",
     "soba @ file://{root}/../",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 

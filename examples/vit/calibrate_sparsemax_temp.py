@@ -11,6 +11,8 @@ from vit.modeling_vit import ViTForImageClassification
 
 from sobalib.utils import calibrate_sparsemax_temperature
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 ds = load_dataset("imagenet-1k", split="validation", streaming=True)
 assert isinstance(ds, IterableDataset)
 ds_examples = ds.take(5)
@@ -23,6 +25,8 @@ base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
+).to(
+    device  # type: ignore
 )
 
 
@@ -57,7 +61,7 @@ def register_qk_hook(
 all_layer_intermediates = [{} for _ in range(config.num_hidden_layers)]
 register_qk_hook(model, all_layer_intermediates)
 
-inputs = image_processor(images=images, return_tensors="pt")
+inputs = image_processor(images=images, return_tensors="pt").to(device)
 
 with torch.no_grad():
     model(**inputs)

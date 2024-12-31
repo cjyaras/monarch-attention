@@ -4,6 +4,7 @@ from typing import Literal, Optional, Tuple
 import torch
 import torch.nn as nn
 from einops import rearrange
+from torch._prims_common import DeviceLikeType
 from torch.nn.functional import normalize, pad
 
 Tensor = torch.Tensor
@@ -14,13 +15,14 @@ PadType = Literal["pre", "post"]
 def _init(
     shape: Tuple[int, ...],
     perturb_scale: Optional[float] = None,
+    device: Optional[DeviceLikeType] = None,
 ) -> Tensor:
     center = 1 / sqrt(shape[-1])
     if perturb_scale is not None:
-        noise = 2 * perturb_scale * torch.rand(shape) - perturb_scale
+        noise = 2 * perturb_scale * torch.rand(shape, device=device) - perturb_scale
         return center + noise
     else:
-        return center * torch.ones(shape)
+        return center * torch.ones(shape, device=device)
 
 
 def _project(x: Tensor, u: Tensor) -> Tensor:
