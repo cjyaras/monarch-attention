@@ -35,9 +35,25 @@ model = ViTForImageClassification.from_pretrained(
 
 with torch.no_grad():
     model(**inputs)
-    start = time()
-    model(**inputs)
-    print(f"Softmax attention time: {time() - start:.2f}s")
+
+if torch.cuda.is_available():
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+
+    with torch.no_grad():
+        model(**inputs)
+        start_event.record()  # type: ignore
+        model(**inputs)
+        end_event.record()  # type: ignore
+        torch.cuda.synchronize()
+        print(f"Softmax attention time: {start_event.elapsed_time(end_event):.2f}ms")
+else:
+
+    with torch.no_grad():
+        model(**inputs)
+        start = time()
+        model(**inputs)
+        print(f"Softmax attention time: {time() - start:.2f}s")
 
 with FlopTensorDispatchMode(model) as ftdm:
     with torch.no_grad():
@@ -62,10 +78,24 @@ model = ViTForImageClassification.from_pretrained(
 
 with torch.no_grad():
     model(**inputs)
-    start = time()
-    model(**inputs)
-    print(f"Monarch attention time: {time() - start:.2f}s")
-    print()
+
+if torch.cuda.is_available():
+    start_event = torch.cuda.Event(enable_timing=True)
+    end_event = torch.cuda.Event(enable_timing=True)
+
+    with torch.no_grad():
+        model(**inputs)
+        start_event.record()  # type: ignore
+        model(**inputs)
+        end_event.record()  # type: ignore
+        torch.cuda.synchronize()
+        print(f"Monarch attention time: {start_event.elapsed_time(end_event):.2f}ms")
+else:
+    with torch.no_grad():
+        model(**inputs)
+        start = time()
+        model(**inputs)
+        print(f"Monarch attention time: {time() - start:.2f}s")
 
 with FlopTensorDispatchMode(model) as ftdm:
     with torch.no_grad():

@@ -8,13 +8,12 @@ Tensor = torch.Tensor
 
 
 def calibrate_sparsemax_temperature(
-    query: Tensor, key: Tensor, range: Tensor
+    query: Tensor, key: Tensor, attention_temperature_vals: Tensor
 ) -> Tensor:
     # query: [num_examples, num_layers, num_heads, seq_len, dim_per_head]
     # key: [num_examples, num_layers, num_heads, seq_len, dim_per_head]
     # return: [num_layers, num_heads]
     sparsemax = Sparsemax()
-    attention_temperature_vals = torch.logspace(0, 1.3, 20)
     attn_weights = query @ key.transpose(-1, -2) / sqrt(query.size(-1))
     softmax_attn_weights = softmax(attn_weights, dim=-1)[..., None, :, :]
     sparsemax_attn_weights = sparsemax(
