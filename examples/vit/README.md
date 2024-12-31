@@ -6,27 +6,27 @@ python vit/monarch_vit_example.py
 ```
 from the examples directory. Expected output (on CPU):
 ```
-Softmax attention time: 0.27s
-Monarch attention time: 0.77s
+Softmax attention time: 0.24s
+Monarch attention time: 0.58s
 
 Softmax: ['coucal', 'magpie', 'kite', 'bee eater', 'red wolf, maned wolf, Canis rufus, Canis niger']
-Monarch: ['coucal', 'bee eater', 'jacamar', 'bulbul', 'agama']
+Monarch: ['coucal', 'hornbill', 'bee eater', 'agama', 'frilled lizard, Chlamydosaurus kingi']
 True: coucal
 
 Softmax: ['Mexican hairless', 'Italian greyhound', 'Doberman, Doberman pinscher', 'Great Dane', 'Weimaraner']
-Monarch: ['Mexican hairless', 'Italian greyhound', 'Weimaraner', 'Great Dane', 'whippet']
+Monarch: ['Italian greyhound', 'Weimaraner', 'Mexican hairless', 'whippet', 'Great Dane']
 True: Italian greyhound
 
 Softmax: ['valley, vale', 'alp', 'lakeside, lakeshore', 'volcano', 'sandbar, sand bar']
-Monarch: ['valley, vale', 'sandbar, sand bar', 'lakeside, lakeshore', 'alp', 'dam, dike, dyke']
+Monarch: ['volcano', 'valley, vale', 'alp', 'lakeside, lakeshore', 'sandbar, sand bar']
 True: volcano
 
 Softmax: ['Welsh springer spaniel', 'Sussex spaniel', 'English springer, English springer spaniel', 'clumber, clumber spaniel', 'Brittany spaniel']
-Monarch: ['Welsh springer spaniel', 'Blenheim spaniel', 'Brittany spaniel', 'papillon', 'cocker spaniel, English cocker spaniel, cocker']
+Monarch: ['Blenheim spaniel', 'Welsh springer spaniel', 'Brittany spaniel', 'cocker spaniel, English cocker spaniel, cocker', 'papillon']
 True: Welsh springer spaniel
 
 Softmax: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'house finch, linnet, Carpodacus mexicanus']
-Monarch: ['chickadee', 'junco, snowbird', 'jay', 'water ouzel, dipper', 'bulbul']
+Monarch: ['chickadee', 'cockroach, roach', 'cabbage butterfly', 'wing', 'rain barrel']
 True: chickadee
 
 Monarch to Softmax FLOP ratio: 1.18e+08/2.98e+08 (39.48%)
