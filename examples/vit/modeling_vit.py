@@ -253,21 +253,27 @@ class ViTSelfAttention(nn.Module):
             if self.attention_type == "low-rank":
                 rank = config.efficient_attention_rank
                 assert rank is not None
-                self.efficient_attn = LowRankAttention(
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    rank=rank,
+                self.efficient_attn = torch.compile(
+                    LowRankAttention(
+                        num_steps=num_steps,
+                        step_size=step_size,
+                        rank=rank,
+                    ),
+                    mode="max-autotune",
                 )
 
             else:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = MonarchAttention(
-                    block_size=block_size,
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    pad_type=pad_type,  # type: ignore
+                self.efficient_attn = torch.compile(
+                    MonarchAttention(
+                        block_size=block_size,
+                        num_steps=num_steps,
+                        step_size=step_size,
+                        pad_type=pad_type,  # type: ignore
+                    ),
+                    mode="max-autotune",
                 )
 
         attention_temperature = config.attention_temperature
