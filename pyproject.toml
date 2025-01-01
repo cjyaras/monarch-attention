@@ -12,7 +12,7 @@ dependencies = [
     "torch",
     "opt_einsum",
     "einops",
-    "sparsemax",
+    "entmax",
 ]
 requires-python = ">=3.10"
 authors = [

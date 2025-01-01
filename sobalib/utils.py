@@ -2,7 +2,7 @@ from math import inf, sqrt
 from typing import List
 
 import torch
-from sparsemax import Sparsemax
+from entmax import sparsemax
 from torch.nn.functional import softmax
 from tqdm.auto import tqdm
 
@@ -20,7 +20,6 @@ def calibrate_sparsemax_temperature(
     returns: [num_layers, num_heads]
     """
     num_layers, num_heads, seq_len, dim_per_head = query_list[0].shape
-    sparsemax = Sparsemax()
     differences = torch.zeros(
         num_layers,
         num_heads,

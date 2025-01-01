@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.utils.checkpoint
-from sparsemax import Sparsemax
+from entmax import sparsemax
 from torch import nn
 from torch.nn import BCEWithLogitsLoss, CrossEntropyLoss, MSELoss
 from transformers.activations import ACT2FN
@@ -242,10 +242,7 @@ class ViTSelfAttention(nn.Module):
         assert isinstance(config, ModifiedViTConfig)
         self.attention_type = config.attention_type
 
-        if self.attention_type == "sparsemax":
-            self.sparsemax = Sparsemax(dim=-1)
-
-        elif self.attention_type in ["low-rank", "monarch"]:
+        if self.attention_type in ["low-rank", "monarch"]:
             num_steps = config.efficient_attention_num_steps
             step_size = config.efficient_attention_step_size
             assert num_steps is not None and step_size is not None
@@ -292,7 +289,6 @@ class ViTSelfAttention(nn.Module):
                     f"Invalid type for attention_temperature: {type(attention_temperature)}"
                 )
             attention_temperature_array = attention_temperature_array[..., None, None]
-            # self.attention_temperature = attention_temperature_array
             self.register_buffer(
                 "attention_temperature", attention_temperature_array, persistent=False
             )
@@ -332,10 +328,11 @@ class ViTSelfAttention(nn.Module):
         if self.attention_type in ["softmax", "sparsemax"]:
             attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
             attention_probs = (
-                self.sparsemax(attention_scores)
+                sparsemax(attention_scores, dim=-1)
                 if self.attention_type == "sparsemax"
                 else nn.functional.softmax(attention_scores, dim=-1)
             )
+            assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
         else:
             assert output_attentions is False
