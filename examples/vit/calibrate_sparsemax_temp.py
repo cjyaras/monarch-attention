@@ -15,7 +15,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ds = load_dataset("imagenet-1k", split="validation", streaming=True)
 assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(1)
+ds_examples = ds.take(50)
 images = [item["image"] for item in ds_examples]
 image_processor = AutoImageProcessor.from_pretrained(
     "google/vit-base-patch16-224", use_fast=True
@@ -75,6 +75,8 @@ key = torch.stack(
     dim=0,
 ).transpose(1, 0)
 optimal_temperature = calibrate_sparsemax_temperature(
-    query, key, torch.linspace(1, 50, 50).to(device)
+    list(torch.unbind(query)),
+    list(torch.unbind(key)),
+    torch.linspace(1, 50, 50).to(device),
 )
 np.savetxt("vit/optimal_temperature.txt", optimal_temperature.cpu().numpy())

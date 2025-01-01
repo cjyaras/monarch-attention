@@ -13,7 +13,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ds = load_dataset("imagenet-1k", split="validation", streaming=True)
 assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(5)
+ds_examples = ds.take(100)
 images = [item["image"] for item in ds_examples]
 labels = [item["label"] for item in ds_examples]
 image_processor = AutoImageProcessor.from_pretrained(
@@ -26,6 +26,7 @@ k = 5
 # Softmax attention
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
 config.attention_type = "softmax"
+print("Flash Attention:", torch.backends.cuda.flash_sdp_enabled())
 config._attn_implementation = "eager"
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
@@ -61,14 +62,29 @@ with FlopTensorDispatchMode(model) as ftdm:
         softmax_labels = torch.topk(logits, k, dim=-1).indices
     softmax_flops = ftdm.flop_counts["vit.encoder.layer.0.attention"]["bmm.default"]
 
+# Sparsemax attention
+config = ModifiedViTConfig.from_dict(base_config.to_dict())
+config.attention_type = "sparsemax"
+# config.attention_temperature = 10.0
+config.attention_temperature = np.loadtxt("vit/optimal_temperature.txt").tolist()  # type: ignore
+model = ViTForImageClassification.from_pretrained(
+    "google/vit-base-patch16-224", config=config
+).to(
+    device  # type: ignore
+)
+
+with torch.no_grad():
+    logits = model(**inputs).logits
+    sparsemax_labels = torch.topk(logits, k, dim=-1).indices
+
 # Monarch sparsemax attention
 config = ModifiedViTConfig.from_dict(base_config.to_dict())
 assert isinstance(config, ModifiedViTConfig)
 config.attention_type = "monarch"
 # config.attention_temperature = 10.0
 config.attention_temperature = np.loadtxt("vit/optimal_temperature.txt").tolist()  # type: ignore
-config.efficient_attention_num_steps = 2
-config.efficient_attention_step_size = 4e5
+config.efficient_attention_num_steps = 3
+config.efficient_attention_step_size = 1e5
 config.efficient_attention_block_size = 14
 model = ViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
@@ -107,11 +123,14 @@ for i in range(len(images)):
     softmax_string_labels = [
         model.config.id2label[int(softmax_labels[i, j].item())] for j in range(k)
     ]
+    sparsemax_string_labels = [
+        model.config.id2label[int(sparsemax_labels[i, j].item())] for j in range(k)
+    ]
     monarch_string_labels = [
         model.config.id2label[int(monarch_labels[i, j].item())] for j in range(k)
     ]
     print(
-        f"Softmax: {softmax_string_labels}\nMonarch: {monarch_string_labels}\nTrue: {model.config.id2label[labels[i]]}"
+        f"Softmax: {softmax_string_labels}\nSparsemax: {sparsemax_string_labels}\nMonarch: {monarch_string_labels}\nTrue: {model.config.id2label[labels[i]]}"
     )
     print()
 
