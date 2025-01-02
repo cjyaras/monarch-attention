@@ -64,22 +64,28 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                         step_size=step_size,
                         rank=rank,
                     ),
-                    mode="max-autotune",
+                    # mode="max-autotune",
                 )
 
             else:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchAttention(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    ),
-                    mode="max-autotune",
+                self.efficient_attn = MonarchAttention(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,  # type: ignore
                 )
+                # self.efficient_attn = torch.compile(
+                #     MonarchAttention(
+                #         block_size=block_size,
+                #         num_steps=num_steps,
+                #         step_size=step_size,
+                #         pad_type=pad_type,  # type: ignore
+                #     ),
+                #     # mode="max-autotune",
+                # )
 
         if config.scale_attention_temperature:
             self.register_buffer(
@@ -162,8 +168,8 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
 
 
 class CustomRobertaModel(RobertaModel):
-    def __init__(self, config: CustomRobertaConfig):
-        super().__init__(config)
+    def __init__(self, config: CustomRobertaConfig, add_pooling_layer=True):
+        super().__init__(config, add_pooling_layer)
         for layer in self.encoder.layer:
             layer.attention.self = CustomRobertaSelfAttention(config)
         self.post_init()
@@ -172,7 +178,7 @@ class CustomRobertaModel(RobertaModel):
 class CustomRobertaForMaskedLM(RobertaForMaskedLM):
     def __init__(self, config: CustomRobertaConfig):
         super().__init__(config)
-        self.roberta = CustomRobertaModel(config)
+        self.roberta = CustomRobertaModel(config, add_pooling_layer=False)
         self.post_init()
 
 

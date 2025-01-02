@@ -118,12 +118,14 @@ class MonarchAttention(nn.Module):
         num_steps: int,
         step_size: float,
         pad_type: PadType,
+        renormalize: bool = False,
     ):
         super().__init__()
         self.block_size = block_size
         self.num_steps = num_steps
         self.step_size = step_size
         self.pad_type = pad_type
+        self.renormalize = renormalize
 
     def get_num_blocks(self, seq_len: int) -> int:
         num_blocks = ceil(seq_len / self.block_size)
@@ -137,7 +139,9 @@ class MonarchAttention(nn.Module):
 
     def multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
         pad_amount = self.get_pad_amount(inputs.shape[-2])
-        pad_t = (0, 0) + (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        pad_t = (0, 0) + (
+            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        )
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) a -> ... k i a", i=self.block_size)
         Y = torch.einsum("...kji,...kia->...kja", right, X)
@@ -158,7 +162,7 @@ class MonarchAttention(nn.Module):
         if self.pad_type == "pre":
             x[..., 0, :, :pad_amount] = 0.0
         else:
-            x[..., -1, :, -pad_amount or None :] = 0
+            x[..., -1, :, -pad_amount or x.shape[-1] :] = 0
         return x
 
     def grad(
@@ -181,14 +185,16 @@ class MonarchAttention(nn.Module):
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
-        d_left = d_left * _inv_norm(left_params)
+        if self.renormalize:
+            d_left = d_left * _inv_norm(left_params)
         d_right = (
             torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
             - torch.einsum("...jlk,...lja,...kia->...kji", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
-        d_right = d_right * _inv_norm(right_params)
+        if self.renormalize:
+            d_right = d_right * _inv_norm(right_params)
         return d_left, d_right
 
     def get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
@@ -197,7 +203,9 @@ class MonarchAttention(nn.Module):
         pad_amount = self.get_pad_amount(seq_len)
         num_blocks = self.get_num_blocks(seq_len)
 
-        pad_t = (0, 0) + (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        pad_t = (0, 0) + (
+            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
         query = rearrange(query, "... (l j) a -> ... l j a", j=self.block_size)
