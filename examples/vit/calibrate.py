@@ -1,6 +1,5 @@
 from typing import Dict, List
 
-import numpy as np
 import torch
 import torch.nn as nn
 from datasets import load_dataset
@@ -79,4 +78,12 @@ optimal_temperature = calibrate_sparsemax_temperature(
     list(torch.unbind(key)),
     torch.linspace(1, 50, 50).to(device),
 )
-np.savetxt("vit/optimal_temperature.txt", optimal_temperature.cpu().numpy())
+torch.save(
+    {
+        f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
+            i
+        ]
+        for i in range(len(optimal_temperature))
+    },
+    "vit/sparsemax_temperature.pt",
+)
