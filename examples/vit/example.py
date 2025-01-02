@@ -14,13 +14,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ds = load_dataset("imagenet-1k", split="validation", streaming=True)
 assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(1)
+ds_examples = ds.take(5)
 images = [item["image"] for item in ds_examples]
 labels = [item["label"] for item in ds_examples]
 image_processor = AutoImageProcessor.from_pretrained(
     "google/vit-base-patch16-224", use_fast=True
 )
 inputs = image_processor(images=images, return_tensors="pt").to(device)
+
 base_config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
 k = 5
 

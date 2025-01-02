@@ -1,12 +1,10 @@
 from typing import Dict, List
 
 import torch
-import torch.nn as nn
 from datasets import load_dataset
 from datasets.iterable_dataset import IterableDataset
 from transformers import AutoImageProcessor
-from vit.configuration_vit import ModifiedViTConfig, ViTConfig
-from vit.modeling_vit import ViTForImageClassification
+from vit.models import CustomViTConfig, CustomViTForImageClassification
 
 from sobalib.utils import calibrate_sparsemax_temperature
 
@@ -20,17 +18,16 @@ image_processor = AutoImageProcessor.from_pretrained(
     "google/vit-base-patch16-224", use_fast=True
 )
 
-base_config = ViTConfig.from_pretrained("google/vit-base-patch16-224")
-config = ModifiedViTConfig.from_dict(base_config.to_dict())
-model = ViTForImageClassification.from_pretrained(
+config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
+model = CustomViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
-).to(
-    device  # type: ignore
 )
+model = model.to(device)  # type: ignore
 
 
 def register_qk_hook(
-    model: nn.Module, all_layer_intermediates: List[Dict[str, torch.Tensor]]
+    model: CustomViTForImageClassification,
+    all_layer_intermediates: List[Dict[str, torch.Tensor]],
 ):
     layers = model.vit.encoder.layer
 

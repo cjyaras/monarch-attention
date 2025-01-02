@@ -1,14 +1,17 @@
+"""Forked from https://huggingface.co/mtreviso/sparsemax-roberta/blob/main/sparse_roberta.py."""
+
 from math import sqrt
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import torch
-import torch.nn as nn
 from entmax import sparsemax
-from transformers.models.vit.configuration_vit import ViTConfig
-from transformers.models.vit.modeling_vit import (
-    ViTForImageClassification,
-    ViTModel,
-    ViTSelfAttention,
+from torch import nn
+from transformers.models.roberta.configuration_roberta import RobertaConfig
+from transformers.models.roberta.modeling_roberta import (
+    RobertaForMaskedLM,
+    RobertaForSequenceClassification,
+    RobertaModel,
+    RobertaSelfAttention,
 )
 
 AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
@@ -16,10 +19,10 @@ AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
 from sobalib.layers import LowRankAttention, MonarchAttention, PadType
 
 
-class CustomViTConfig(ViTConfig):
+class CustomRobertaConfig(RobertaConfig):
     def __init__(
         self,
-        attention_type: AttentionType = "sparsemax",
+        attention_type: AttentionType = "softmax",
         scale_attention_temperature: bool = False,
         efficient_attention_num_steps: Optional[int] = None,
         efficient_attention_step_size: Optional[float] = None,
@@ -39,10 +42,12 @@ class CustomViTConfig(ViTConfig):
         self.efficient_attention_pad_type = efficient_attention_pad_type
 
 
-class CustomViTSelfAttention(ViTSelfAttention):
+class CustomRobertaSelfAttention(RobertaSelfAttention):
+    def __init__(self, config: CustomRobertaConfig, position_embedding_type=None):
+        super().__init__(config, position_embedding_type=position_embedding_type)
+        assert self.position_embedding_type == "absolute"
+        assert not self.is_decoder
 
-    def __init__(self, config: CustomViTConfig):
-        super().__init__(config)
         self.attention_type = config.attention_type
 
         if self.attention_type in ["low-rank", "monarch"]:
@@ -87,15 +92,33 @@ class CustomViTSelfAttention(ViTSelfAttention):
 
         self.enable_flash_attention = config._attn_implementation == "sdpa"
 
+    # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
+    def load_state_dict(self, state_dict, **kwargs):
+        if "sparsity_per_head" in state_dict:
+            del state_dict["sparsity_per_head"]
+        if "n_tokens" in state_dict:
+            del state_dict["n_tokens"]
+        super().load_state_dict(state_dict, **kwargs)
+
     def forward(
         self,
-        hidden_states: torch.FloatTensor,
-        head_mask: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        encoder_hidden_states: Optional[torch.FloatTensor] = None,
+        encoder_attention_mask: Optional[torch.FloatTensor] = None,
+        past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        output_attentions: Optional[bool] = False,
+    ) -> Tuple[torch.Tensor]:
 
+        assert attention_mask is None
         assert head_mask is None
-        assert not output_attentions
+        assert encoder_hidden_states is None
+        assert encoder_attention_mask is None
+        assert past_key_value is None
+        assert output_attentions is False
+
+        assert not self.training
 
         mixed_query_layer = self.query(hidden_states)
 
@@ -135,26 +158,26 @@ class CustomViTSelfAttention(ViTSelfAttention):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(new_context_layer_shape)
 
-        return context_layer, None  # type: ignore
+        return (context_layer,)
 
 
-class CustomViTModel(ViTModel):
-
-    def __init__(
-        self,
-        config: CustomViTConfig,
-        add_pooling_layer: bool = True,
-        use_mask_token: bool = False,
-    ):
-        super().__init__(config, add_pooling_layer, use_mask_token)
+class CustomRobertaModel(RobertaModel):
+    def __init__(self, config: CustomRobertaConfig):
+        super().__init__(config)
         for layer in self.encoder.layer:
-            layer.attention.attention = CustomViTSelfAttention(config)
+            layer.attention.self = CustomRobertaSelfAttention(config)
         self.post_init()
 
 
-class CustomViTForImageClassification(ViTForImageClassification):
-
-    def __init__(self, config: CustomViTConfig):
+class CustomRobertaForMaskedLM(RobertaForMaskedLM):
+    def __init__(self, config: CustomRobertaConfig):
         super().__init__(config)
-        self.vit = CustomViTModel(config)
+        self.roberta = CustomRobertaModel(config)
+        self.post_init()
+
+
+class CustomRobertaForSequenceClassification(RobertaForSequenceClassification):
+    def __init__(self, config: CustomRobertaConfig):
+        super().__init__(config)
+        self.roberta = CustomRobertaModel(config)
         self.post_init()
