@@ -1,4 +1,3 @@
-# TODO: Add padding for attention mask
 from math import ceil, sqrt
 from typing import Literal, Optional, Tuple
 
@@ -86,7 +85,6 @@ class LowRankMHA(nn.Module):
         return left @ right
 
     def _get_valid_mask(self, attention_mask: Optional[Tensor]) -> Optional[Tensor]:
-        # attention_mask should be of shape (batch_size, seq_len)
         if attention_mask is not None:
             attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
         return attention_mask
@@ -166,12 +164,14 @@ class MonarchMHA(nn.Module):
         num_steps: int,
         step_size: float,
         pad_type: MonarchPadType,
+        excess_padding: int = 0,
     ):
         super().__init__()
         self.block_size = block_size
         self.num_steps = num_steps
         self.step_size = step_size
         self.pad_type = pad_type
+        self.excess_padding = excess_padding
 
     def get_matrix(
         self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
@@ -206,7 +206,8 @@ class MonarchMHA(nn.Module):
         return self._multiply(left, right, value)
 
     def _get_num_blocks(self, seq_len: int) -> int:
-        num_blocks = ceil(seq_len / self.block_size)
+        excess_seq_len = seq_len + self.excess_padding
+        num_blocks = ceil(excess_seq_len / self.block_size)
         return num_blocks
 
     def _get_pad_amount(self, seq_len: int) -> int:
@@ -252,7 +253,6 @@ class MonarchMHA(nn.Module):
         self, right_params: Tensor, valid_mask: Optional[Tensor], pad_amount: int
     ) -> Tensor:
 
-        # TODO: Check this
         right_params_flat = rearrange(right_params, "... k j i -> ... j (k i)")
 
         if self.pad_type == "pre":

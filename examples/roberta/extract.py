@@ -1,31 +1,31 @@
+from math import sqrt
 from typing import Dict, List
 
+import matplotlib.pyplot as plt
 import torch
-from datasets import load_dataset
-from datasets.iterable_dataset import IterableDataset
+from entmax import sparsemax
 from roberta.models import CustomRobertaConfig, CustomRobertaForMaskedLM
-from transformers import RobertaTokenizer
+from transformers import RobertaTokenizer, pipeline
 from transformers.utils import logging
 
-from sobalib.layers import LowRankAttention, MonarchAttention
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from sobalib.layers import MonarchMHA
 
 logging.set_verbosity_error()
 
-ds = load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
-assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(1)
-texts = [item["text"] for item in ds_examples]
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+with open("/Users/cjyaras/Desktop/soba/examples/roberta/text.txt", "r") as f:
+    text = f.read()
 
 tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
-inputs = tokenizer(texts, return_tensors="pt", max_length=196, truncation=True)
-
 base_config = CustomRobertaConfig.from_pretrained("mtreviso/sparsemax-roberta")
+
 config = CustomRobertaConfig.from_dict(base_config.to_dict())
+config.attention_type = "sparsemax"
 model = CustomRobertaForMaskedLM.from_pretrained(
     "mtreviso/sparsemax-roberta", config=config
 )
+model = model.to(device)  # type: ignore
 
 
 def register_qk_hook(
@@ -61,7 +61,8 @@ all_layer_intermediates = [{} for _ in range(config.num_hidden_layers)]
 register_qk_hook(model, all_layer_intermediates)
 
 with torch.no_grad():
-    model(**inputs).logits
+    unmasker = pipeline("fill-mask", model=model, tokenizer=tokenizer, device=device)
+    unmasker(text)
 
 query = torch.stack(
     [layer_intermediates["query"] for layer_intermediates in all_layer_intermediates],
@@ -73,25 +74,117 @@ key = torch.stack(
     dim=0,
 ).transpose(1, 0)
 
-from math import sqrt
-
-import matplotlib.pyplot as plt
-from entmax import sparsemax
-
 with torch.no_grad():
-    # layer, head = 4, 7
-    # layer, head = 0, 0
-    layer, head = 9, 9
-    print(query.shape)
+    layer, head = 5, 2
 
-    query = query[0, layer, head] / sqrt(query.shape[-1])
-    key = key[0, layer, head]
-    attn_scores = query @ key.T
+    # query = query[0, layer, head][1:][None, None]
+    # key = key[0, layer, head][1:][None, None]
 
-    efficient_attn = MonarchAttention(14, 3, 1e6, "pre")
-    # efficient_attn = LowRankAttention(14, 100, 1e2)
+    query = query[0, layer, head][None, None]
+    key = key[0, layer, head][None, None]
+
+    attn_scores = (query @ key.transpose(-1, -2) / sqrt(query.shape[-1]))[0, 0]
+    efficient_attn = MonarchMHA(16, 500, 1e4, "pre")
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
     ax[0].imshow(sparsemax(attn_scores))  # type: ignore
-    ax[1].imshow(efficient_attn.get_matrix(query, key))
+    ax[1].imshow(efficient_attn.get_matrix(query, key)[0, 0])
     plt.show()
+
+# from typing import Dict, List
+
+# import torch
+# from datasets import load_dataset
+# from datasets.iterable_dataset import IterableDataset
+# from roberta.models import CustomRobertaConfig, CustomRobertaForMaskedLM
+# from transformers import RobertaTokenizer
+# from transformers.utils import logging
+
+# from sobalib.layers import LowRankAttention, MonarchAttention
+
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# logging.set_verbosity_error()
+
+# ds = load_dataset("wikipedia", "20220301.en", split="train", streaming=True)
+# assert isinstance(ds, IterableDataset)
+# ds_examples = ds.take(1)
+# texts = [item["text"] for item in ds_examples]
+
+# tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
+# inputs = tokenizer(texts, return_tensors="pt", max_length=196, truncation=True)
+
+# base_config = CustomRobertaConfig.from_pretrained("mtreviso/sparsemax-roberta")
+# config = CustomRobertaConfig.from_dict(base_config.to_dict())
+# model = CustomRobertaForMaskedLM.from_pretrained(
+#     "mtreviso/sparsemax-roberta", config=config
+# )
+
+
+# def register_qk_hook(
+#     model: CustomRobertaForMaskedLM,
+#     all_layer_intermediates: List[Dict[str, torch.Tensor]],
+# ):
+#     layers = model.roberta.encoder.layer
+
+#     for layer_idx in range(len(layers)):
+#         attn_layer = layers[layer_idx].attention.self
+
+#         def query_hook(_layer_idx):
+#             def hook(module, input, output):
+#                 all_layer_intermediates[_layer_idx].update(
+#                     {"query": attn_layer.transpose_for_scores(output)}
+#                 )
+
+#             return hook
+
+#         def key_hook(_layer_idx):
+#             def hook(module, input, output):
+#                 all_layer_intermediates[_layer_idx].update(
+#                     {"key": attn_layer.transpose_for_scores(output)}
+#                 )
+
+#             return hook
+
+#         attn_layer.query.register_forward_hook(query_hook(layer_idx))
+#         attn_layer.key.register_forward_hook(key_hook(layer_idx))
+
+
+# all_layer_intermediates = [{} for _ in range(config.num_hidden_layers)]
+# register_qk_hook(model, all_layer_intermediates)
+
+# with torch.no_grad():
+#     model(**inputs).logits
+
+# query = torch.stack(
+#     [layer_intermediates["query"] for layer_intermediates in all_layer_intermediates],
+#     dim=0,
+# ).transpose(1, 0)
+
+# key = torch.stack(
+#     [layer_intermediates["key"] for layer_intermediates in all_layer_intermediates],
+#     dim=0,
+# ).transpose(1, 0)
+
+# from math import sqrt
+
+# import matplotlib.pyplot as plt
+# from entmax import sparsemax
+
+# with torch.no_grad():
+#     # layer, head = 4, 7
+#     # layer, head = 0, 0
+#     layer, head = 9, 9
+#     print(query.shape)
+
+#     query = query[0, layer, head] / sqrt(query.shape[-1])
+#     key = key[0, layer, head]
+#     attn_scores = query @ key.T
+
+#     efficient_attn = MonarchAttention(14, 3, 1e6, "pre")
+#     # efficient_attn = LowRankAttention(14, 100, 1e2)
+
+#     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+#     ax[0].imshow(sparsemax(attn_scores))  # type: ignore
+#     ax[1].imshow(efficient_attn.get_matrix(query, key))
+#     plt.show()

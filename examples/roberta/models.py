@@ -1,5 +1,7 @@
 """Forked from https://huggingface.co/mtreviso/sparsemax-roberta/blob/main/sparse_roberta.py."""
 
+# TODO: Allow attention_mask for efficient attention by modifying attention_mask in model
+
 from math import sqrt
 from typing import Literal, Optional, Tuple
 
@@ -71,14 +73,20 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchMHA(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    ),
-                    mode="reduce-overhead",
+                # self.efficient_attn = torch.compile(
+                #     MonarchMHA(
+                #         block_size=block_size,
+                #         num_steps=num_steps,
+                #         step_size=step_size,
+                #         pad_type=pad_type,  # type: ignore
+                #     ),
+                #     # mode="reduce-overhead",
+                # )
+                self.efficient_attn = MonarchMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,  # type: ignore
                 )
 
         if config.scale_attention_temperature:

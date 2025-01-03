@@ -1,14 +1,15 @@
 from time import time
+from typing import List
 
 import torch
 from datasets import load_dataset
 from datasets.iterable_dataset import IterableDataset
 from torchtnt.utils.flops import FlopTensorDispatchMode
-from transformers import AutoImageProcessor
+from transformers import ViTImageProcessor, pipeline
 from transformers.utils import logging
 from vit.models import CustomViTConfig, CustomViTForImageClassification
 
-logging.set_verbosity_error()
+logging.set_verbosity(logging.CRITICAL)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -17,15 +18,17 @@ assert isinstance(ds, IterableDataset)
 ds_examples = ds.take(5)
 images = [item["image"] for item in ds_examples]
 labels = [item["label"] for item in ds_examples]
-image_processor = AutoImageProcessor.from_pretrained(
+
+image_processor = ViTImageProcessor.from_pretrained(
     "google/vit-base-patch16-224", use_fast=True
 )
-inputs = image_processor(images=images, return_tensors="pt").to(device)
 
 base_config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
-k = 5
 
-# Softmax attention
+top_k = 3
+
+# Softmax
+
 config = CustomViTConfig.from_dict(base_config.to_dict())
 config.attention_type = "softmax"
 config._attn_implementation = "eager"
@@ -33,53 +36,39 @@ model = CustomViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
 )
 model = model.to(device)  # type: ignore
+classifier = pipeline(
+    "image-classification", model=model, image_processor=image_processor, device=device
+)
 
 with torch.no_grad():
-    model(**inputs)
-
-if torch.cuda.is_available():
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-
-    with torch.no_grad():
-        model(**inputs)
-        start_event.record()  # type: ignore
-        model(**inputs)
-        end_event.record()  # type: ignore
-        torch.cuda.synchronize()
-        print(f"Softmax attention time: {start_event.elapsed_time(end_event):.2f}ms")
-else:
-
-    with torch.no_grad():
-        model(**inputs)
-        start = time()
-        model(**inputs)
-        print(f"Softmax attention time: {time() - start:.2f}s")
+    classifier(images)
 
 with FlopTensorDispatchMode(model) as ftdm:
-    with torch.no_grad():
-        logits = model(**inputs).logits
-        softmax_labels = torch.topk(logits, k, dim=-1).indices
+
+    if torch.cuda.is_available():
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+
+        with torch.no_grad():
+            start_event.record()  # type: ignore
+            softmax_outputs = classifier(images)
+            end_event.record()  # type: ignore
+            torch.cuda.synchronize()
+            print(
+                f"Softmax attention time: {start_event.elapsed_time(end_event):.2f}ms"
+            )
+
+    else:
+
+        with torch.no_grad():
+            start = time()
+            softmax_outputs = classifier(images)
+            print(f"Softmax attention time: {time() - start:.2f}s")
+
     softmax_flops = ftdm.flop_counts["vit.encoder.layer.0.attention"]["bmm.default"]
 
-# Sparsemax attention
-config = CustomViTConfig.from_dict(base_config.to_dict())
-assert isinstance(config, CustomViTConfig)
-config.attention_type = "sparsemax"
-config.scale_attention_temperature = True
-model = CustomViTForImageClassification.from_pretrained(
-    "google/vit-base-patch16-224", config=config
-)
-model.load_state_dict(
-    torch.load("vit/sparsemax_temperature.pt", weights_only=True), strict=False
-)
-model = model.to(device)  # type: ignore
+# Monarch sparsemax
 
-with torch.no_grad():
-    logits = model(**inputs).logits
-    sparsemax_labels = torch.topk(logits, k, dim=-1).indices
-
-# Monarch sparsemax attention
 config = CustomViTConfig.from_dict(base_config.to_dict())
 assert isinstance(config, CustomViTConfig)
 config.attention_type = "monarch"
@@ -95,46 +84,46 @@ model.load_state_dict(
 )
 model = model.to(device)  # type: ignore
 
+classifier = pipeline(
+    "image-classification", model=model, image_processor=image_processor, device=device
+)
+
 with torch.no_grad():
-    model(**inputs)
-
-if torch.cuda.is_available():
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-
-    with torch.no_grad():
-        model(**inputs)
-        start_event.record()  # type: ignore
-        model(**inputs)
-        end_event.record()  # type: ignore
-        torch.cuda.synchronize()
-        print(f"Monarch attention time: {start_event.elapsed_time(end_event):.2f}ms")
-else:
-    with torch.no_grad():
-        model(**inputs)
-        start = time()
-        model(**inputs)
-        print(f"Monarch attention time: {time() - start:.2f}s")
+    classifier(images)
 
 with FlopTensorDispatchMode(model) as ftdm:
-    with torch.no_grad():
-        logits = model(**inputs).logits
-        monarch_labels = torch.topk(logits, k, dim=-1).indices
+
+    if torch.cuda.is_available():
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+
+        with torch.no_grad():
+            start_event.record()  # type: ignore
+            monarch_outputs = classifier(images)
+            end_event.record()  # type: ignore
+            torch.cuda.synchronize()
+            print(
+                f"Monarch attention time: {start_event.elapsed_time(end_event):.2f}ms"
+            )
+
+    else:
+
+        with torch.no_grad():
+            start = time()
+            monarch_outputs = classifier(images)
+            print(f"Monarch attention time: {time() - start:.2f}s")
+
     monarch_flops = ftdm.flop_counts["vit.encoder.layer.0.attention"]["bmm.default"]
 
+assert isinstance(softmax_outputs, List)
+assert isinstance(monarch_outputs, List)
+
 for i in range(len(images)):
-    softmax_string_labels = [
-        model.config.id2label[int(softmax_labels[i, j].item())] for j in range(k)
-    ]
-    sparsemax_string_labels = [
-        model.config.id2label[int(sparsemax_labels[i, j].item())] for j in range(k)
-    ]
-    monarch_string_labels = [
-        model.config.id2label[int(monarch_labels[i, j].item())] for j in range(k)
-    ]
-    print(
-        f"Softmax: {softmax_string_labels}\nSparsemax: {sparsemax_string_labels}\nMonarch: {monarch_string_labels}\nTrue: {model.config.id2label[labels[i]]}"
-    )
+    print("Softmax:")
+    print(softmax_outputs[i][:top_k])
+    print("Monarch:")
+    print(monarch_outputs[i][:top_k])
+    print(f"True: {model.config.id2label[labels[i]]}")
     print()
 
 print(
