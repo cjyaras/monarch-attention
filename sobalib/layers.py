@@ -1,3 +1,4 @@
+# TODO: Add padding for attention mask
 from math import ceil, sqrt
 from typing import Literal, Optional, Tuple
 
@@ -12,7 +13,7 @@ Tensor = torch.Tensor
 PadType = Literal["pre", "post"]
 
 
-def _init(
+def _fast_simplex_init(
     shape: Tuple[int, ...],
     perturb_scale: Optional[float] = None,
     device: Optional[DeviceLikeType] = None,
@@ -33,7 +34,7 @@ def _inv_norm(x: Tensor) -> Tensor:
     return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
 
 
-class LowRankAttention(nn.Module):
+class LowRankMHA(nn.Module):
 
     def __init__(self, rank: int, num_steps: int, step_size: float):
         super().__init__()
@@ -41,16 +42,55 @@ class LowRankAttention(nn.Module):
         self.num_steps = num_steps
         self.step_size = step_size
 
-    @staticmethod
-    def multiply(left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
+    def get_matrix(
+        self,
+        query: Tensor,
+        key: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        left, right = self._get_factors(query, key)
+        return self._get_matrix_from_factors(left, right)
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        query: (batch_size, num_heads, seq_len, head_dim)
+        key: (batch_size, num_heads, seq_len, head_dim)
+        value: (batch_size, num_heads, seq_len, head_dim)
+        attention_mask: (batch_size, seq_len)
+        """
+        valid_mask = self._get_valid_mask(attention_mask)
+        left, right = self._get_factors(query, key, valid_mask)
+        return self._multiply(left, right, value)
+
+    def _multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
         return left @ (right @ inputs)
 
-    @staticmethod
-    def get_matrix_from_factors(left: Tensor, right: Tensor) -> Tensor:
+    def _get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
         return left @ right
 
-    @staticmethod
-    def grad(
+    def _get_valid_mask(self, attention_mask: Optional[Tensor]) -> Optional[Tensor]:
+        # attention_mask should be of shape (batch_size, seq_len)
+        if attention_mask is not None:
+            attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
+        return attention_mask
+
+    def _mask_right(self, right_params: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
+        # right_params: (batch_size, num_heads, rank, seq_len)
+        # valid_mask should be of shape (batch_size, 1, 1, seq_len)
+
+        if valid_mask is None:
+            return right_params
+
+        return right_params * valid_mask
+
+    def _grad(
+        self,
         left_params: Tensor,
         right_params: Tensor,
         query: Tensor,
@@ -62,34 +102,38 @@ class LowRankAttention(nn.Module):
         left = left_sphere**2
         right = right_sphere**2
         d_left = (
-            torch.einsum("...jk,...ki,...li->...jl", left, right, right)
-            - torch.einsum("...ja,...ia,...li->...jl", query, key, right)
+            torch.einsum("bhjk,bhki,bhli->bhjl", left, right, right)
+            - torch.einsum("bhja,bhia,bhli->bhjl", query, key, right)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _inv_norm(left_params)
         d_right = (
-            torch.einsum("...jk,...jl,...li->...ki", left, left, right)
-            - torch.einsum("...jk,...ja,...ia->...ki", left, query, key)
+            torch.einsum("bhjk,bhjl,bhli->bhki", left, left, right)
+            - torch.einsum("bhjk,bhja,bhia->bhki", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _inv_norm(right_params)
         return d_left, d_right
 
-    def get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
-        batch_size = query.shape[:-2]
-        seq_len = query.shape[-2]
+    def _get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
+        batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Need small perturbation to break symmetry
-        left_params = _init(
-            batch_size + (seq_len, self.rank), perturb_scale=1e-3, device=query.device
+        left_params = _fast_simplex_init(
+            (batch_size, num_heads, seq_len, self.rank),
+            perturb_scale=1e-3,
+            device=query.device,
         )
-        right_params = _init(
-            batch_size + (self.rank, seq_len), perturb_scale=1e-3, device=query.device
+        right_params = _fast_simplex_init(
+            (batch_size, num_heads, self.rank, seq_len),
+            perturb_scale=1e-3,
+            device=query.device,
         )
 
         for _ in range(self.num_steps):
+            right_params = self._mask_right(right_params, valid_mask)
             d_left_params, d_right_params = self.grad(
                 left_params, right_params, query, key, seq_len
             )
@@ -97,20 +141,12 @@ class LowRankAttention(nn.Module):
             right_params = right_params - self.step_size * d_right_params
 
         left = normalize(left_params, dim=-1) ** 2
-        right = normalize(right_params, dim=-1) ** 2
+        right = normalize(self._mask_right(right_params, valid_mask), dim=-1) ** 2
 
         return left, right
 
-    def get_matrix(self, query: Tensor, key: Tensor) -> Tensor:
-        left, right = self.get_factors(query, key)
-        return self.get_matrix_from_factors(left, right)
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
-        left, right = self.get_factors(query, key)
-        return self.multiply(left, right, value)
-
-
-class MonarchAttention(nn.Module):
+class MonarchMHA(nn.Module):
 
     def __init__(
         self,
@@ -127,18 +163,34 @@ class MonarchAttention(nn.Module):
         self.pad_type = pad_type
         self.renormalize = renormalize
 
-    def get_num_blocks(self, seq_len: int) -> int:
+    def get_matrix(self, query: Tensor, key: Tensor) -> Tensor:
+        seq_len = query.shape[-2]
+        pad_amount = self._get_pad_amount(seq_len)
+
+        left, right = self._get_factors(query, key)
+        matrix = self._get_matrix_from_factors(left, right)
+        return (
+            matrix[..., pad_amount:, pad_amount:]
+            if self.pad_type == "pre"
+            else matrix[..., : -pad_amount or None, : -pad_amount or None]
+        )
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        left, right = self._get_factors(query, key)
+        return self._multiply(left, right, value)
+
+    def _get_num_blocks(self, seq_len: int) -> int:
         num_blocks = ceil(seq_len / self.block_size)
         return num_blocks
 
-    def get_pad_amount(self, seq_len: int) -> int:
-        num_blocks = self.get_num_blocks(seq_len)
+    def _get_pad_amount(self, seq_len: int) -> int:
+        num_blocks = self._get_num_blocks(seq_len)
         seq_len_padded = self.block_size * num_blocks
         pad_amount = seq_len_padded - seq_len
         return pad_amount
 
-    def multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
-        pad_amount = self.get_pad_amount(inputs.shape[-2])
+    def _multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
+        pad_amount = self._get_pad_amount(inputs.shape[-2])
         pad_t = (0, 0) + (
             (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         )
@@ -153,28 +205,33 @@ class MonarchAttention(nn.Module):
             else z[..., : -pad_amount or None, :]
         )
 
-    def get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
+    def _get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
         out = torch.einsum("...jlk,...kji->...ljki", left, right)
         out = rearrange(out, "... l j k i -> ... (l j) (k i)")
         return out
 
-    def mask(self, x, pad_amount: int) -> Tensor:
-        if self.pad_type == "pre":
-            x[..., 0, :, :pad_amount] = 0.0
-        else:
-            x[..., -1, :, -pad_amount or x.shape[-1] :] = 0
-        return x
+    def _mask_right(self, x: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
 
-    def grad(
+        if valid_mask is None:
+            return x
+
+        # if self.pad_type == "pre":
+        #     x[..., 0, :, :pad_amount] = 0.0
+        # else:
+        #     x[..., -1, :, -pad_amount or x.shape[-1] :] = 0
+        # return x
+
+    def _grad(
         self,
         left_params: Tensor,
         right_params: Tensor,
         query: Tensor,
         key: Tensor,
         seq_len: int,
+        valid_mask: Optional[Tensor],
     ) -> Tuple[Tensor, Tensor]:
-        pad_amount = self.get_pad_amount(seq_len)
-        right_params = self.mask(right_params, pad_amount)
+        pad_amount = self._get_pad_amount(seq_len)
+        right_params = self._mask_right(right_params, valid_mask)
         left_sphere = normalize(left_params, dim=-1)
         right_sphere = normalize(right_params, dim=-1)
         left = left_sphere**2
@@ -197,11 +254,11 @@ class MonarchAttention(nn.Module):
             d_right = d_right * _inv_norm(right_params)
         return d_left, d_right
 
-    def get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
+    def _get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
         batch_size = query.shape[:-2]
         seq_len = query.shape[-2]
-        pad_amount = self.get_pad_amount(seq_len)
-        num_blocks = self.get_num_blocks(seq_len)
+        pad_amount = self._get_pad_amount(seq_len)
+        num_blocks = self._get_num_blocks(seq_len)
 
         pad_t = (0, 0) + (
             (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
@@ -211,38 +268,23 @@ class MonarchAttention(nn.Module):
         query = rearrange(query, "... (l j) a -> ... l j a", j=self.block_size)
         key = rearrange(key, "... (k i) a -> ... k i a", i=self.block_size)
 
-        left_params = _init(
+        left_params = _fast_simplex_init(
             batch_size + (self.block_size, num_blocks, num_blocks), device=query.device
         )
-        right_params = _init(
+        right_params = _fast_simplex_init(
             batch_size + (num_blocks, self.block_size, self.block_size),
             device=query.device,
         )
 
         for _ in range(self.num_steps):
-            d_left_params, d_right_params = self.grad(
+            d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key, seq_len
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
 
         left = normalize(left_params, dim=-1) ** 2
-        right = normalize(self.mask(right_params, pad_amount), dim=-1) ** 2
+        right = normalize(self._mask(right_params, pad_amount), dim=-1) ** 2
 
         return left, right
-
-    def get_matrix(self, query: Tensor, key: Tensor) -> Tensor:
-        seq_len = query.shape[-2]
-        pad_amount = self.get_pad_amount(seq_len)
-
-        left, right = self.get_factors(query, key)
-        matrix = self.get_matrix_from_factors(left, right)
-        return (
-            matrix[..., pad_amount:, pad_amount:]
-            if self.pad_type == "pre"
-            else matrix[..., : -pad_amount or None, : -pad_amount or None]
-        )
-
-    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
-        left, right = self.get_factors(query, key)
-        return self.multiply(left, right, value)
+        return left, right
