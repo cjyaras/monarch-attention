@@ -6,11 +6,9 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from torch._prims_common import DeviceLikeType
-from torch.nn.functional import normalize, pad
+from torch.nn.functional import pad
 
 Tensor = torch.Tensor
-
-PadType = Literal["pre", "post"]
 
 
 def _fast_simplex_init(
@@ -30,8 +28,14 @@ def _project(x: Tensor, u: Tensor) -> Tensor:
     return torch.einsum("...i,...j,...j->...i", x, x, u)
 
 
-def _inv_norm(x: Tensor) -> Tensor:
-    return 1 / torch.linalg.norm(x, dim=-1, keepdims=True)
+def _safe_normalize(x: Tensor, dim: int) -> Tensor:
+    norms = torch.linalg.norm(x, dim=dim, keepdims=True)
+    return torch.where(norms > 0, x / norms, x)
+
+
+def _safe_inv_norm(x: Tensor, dim: int) -> Tensor:
+    norms = torch.linalg.norm(x, dim=dim, keepdims=True)
+    return torch.where(norms > 0, 1 / norms, 0.0)
 
 
 class LowRankMHA(nn.Module):
@@ -48,7 +52,14 @@ class LowRankMHA(nn.Module):
         key: Tensor,
         attention_mask: Optional[Tensor] = None,
     ) -> Tensor:
-        left, right = self._get_factors(query, key)
+        assert query.shape == key.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
+
+        query = query / sqrt(head_dim)
+        valid_mask = self._get_valid_mask(attention_mask)
+        left, right = self._get_factors(query, key, valid_mask)
         return self._get_matrix_from_factors(left, right)
 
     def forward(
@@ -58,12 +69,12 @@ class LowRankMHA(nn.Module):
         value: Tensor,
         attention_mask: Optional[Tensor] = None,
     ) -> Tensor:
-        """
-        query: (batch_size, num_heads, seq_len, head_dim)
-        key: (batch_size, num_heads, seq_len, head_dim)
-        value: (batch_size, num_heads, seq_len, head_dim)
-        attention_mask: (batch_size, seq_len)
-        """
+        assert query.shape == key.shape and key.shape == value.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
+
+        query = query / sqrt(query.shape[-1])
         valid_mask = self._get_valid_mask(attention_mask)
         left, right = self._get_factors(query, key, valid_mask)
         return self._multiply(left, right, value)
@@ -81,12 +92,8 @@ class LowRankMHA(nn.Module):
         return attention_mask
 
     def _mask_right(self, right_params: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
-        # right_params: (batch_size, num_heads, rank, seq_len)
-        # valid_mask should be of shape (batch_size, 1, 1, seq_len)
-
         if valid_mask is None:
             return right_params
-
         return right_params * valid_mask
 
     def _grad(
@@ -97,27 +104,29 @@ class LowRankMHA(nn.Module):
         key: Tensor,
         seq_len: int,
     ) -> Tuple[Tensor, Tensor]:
-        right_sphere = normalize(right_params, dim=-1)
-        left_sphere = normalize(left_params, dim=-1)
+        right_sphere = _safe_normalize(right_params, dim=-1)
+        left_sphere = _safe_normalize(left_params, dim=-1)
         left = left_sphere**2
         right = right_sphere**2
         d_left = (
-            torch.einsum("bhjk,bhki,bhli->bhjl", left, right, right)
-            - torch.einsum("bhja,bhia,bhli->bhjl", query, key, right)
+            torch.einsum("...jk,...ki,...li->...jl", left, right, right)
+            - torch.einsum("...jd,...id,...li->...jl", query, key, right)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
-        d_left = d_left * _inv_norm(left_params)
+        d_left = d_left * _safe_inv_norm(left_params, dim=-1)
         d_right = (
-            torch.einsum("bhjk,bhjl,bhli->bhki", left, left, right)
-            - torch.einsum("bhjk,bhja,bhia->bhki", left, query, key)
+            torch.einsum("...jk,...jl,...li->...ki", left, left, right)
+            - torch.einsum("...jk,...jd,...id->...ki", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
-        d_right = d_right * _inv_norm(right_params)
+        d_right = d_right * _safe_inv_norm(right_params, dim=-1)
         return d_left, d_right
 
-    def _get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
+    def _get_factors(
+        self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Need small perturbation to break symmetry
@@ -134,16 +143,19 @@ class LowRankMHA(nn.Module):
 
         for _ in range(self.num_steps):
             right_params = self._mask_right(right_params, valid_mask)
-            d_left_params, d_right_params = self.grad(
+            d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key, seq_len
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
 
-        left = normalize(left_params, dim=-1) ** 2
-        right = normalize(self._mask_right(right_params, valid_mask), dim=-1) ** 2
+        left = _safe_normalize(left_params, dim=-1) ** 2
+        right = _safe_normalize(self._mask_right(right_params, valid_mask), dim=-1) ** 2
 
         return left, right
+
+
+MonarchPadType = Literal["pre", "post"]
 
 
 class MonarchMHA(nn.Module):
@@ -153,30 +165,44 @@ class MonarchMHA(nn.Module):
         block_size: int,
         num_steps: int,
         step_size: float,
-        pad_type: PadType,
-        renormalize: bool = False,
+        pad_type: MonarchPadType,
     ):
         super().__init__()
         self.block_size = block_size
         self.num_steps = num_steps
         self.step_size = step_size
         self.pad_type = pad_type
-        self.renormalize = renormalize
 
-    def get_matrix(self, query: Tensor, key: Tensor) -> Tensor:
-        seq_len = query.shape[-2]
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
+        assert query.shape == key.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
+
+        query = query / sqrt(head_dim)
         pad_amount = self._get_pad_amount(seq_len)
+        valid_mask = self._get_valid_mask(attention_mask)
+        left, right = self._get_factors(query, key, valid_mask)
+        matrix = self._get_matrix_from_factors(left, right, pad_amount)
+        return matrix
 
-        left, right = self._get_factors(query, key)
-        matrix = self._get_matrix_from_factors(left, right)
-        return (
-            matrix[..., pad_amount:, pad_amount:]
-            if self.pad_type == "pre"
-            else matrix[..., : -pad_amount or None, : -pad_amount or None]
-        )
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        assert query.shape == key.shape and key.shape == value.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
-        left, right = self._get_factors(query, key)
+        query = query / sqrt(head_dim)
+        valid_mask = self._get_valid_mask(attention_mask)
+        left, right = self._get_factors(query, key, valid_mask)
         return self._multiply(left, right, value)
 
     def _get_num_blocks(self, seq_len: int) -> int:
@@ -190,36 +216,65 @@ class MonarchMHA(nn.Module):
         return pad_amount
 
     def _multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
-        pad_amount = self._get_pad_amount(inputs.shape[-2])
+        seq_len = inputs.shape[-2]
+        pad_amount = self._get_pad_amount(seq_len)
         pad_t = (0, 0) + (
             (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         )
         x = pad(inputs, pad_t)
-        X = rearrange(x, "... (k i) a -> ... k i a", i=self.block_size)
-        Y = torch.einsum("...kji,...kia->...kja", right, X)
-        Z = torch.einsum("...jlk,...kja->...lja", left, Y)
-        z = rearrange(Z, "... l j a -> ... (l j) a")
-        return (
-            z[..., pad_amount:, :]
-            if self.pad_type == "pre"
-            else z[..., : -pad_amount or None, :]
-        )
+        X = rearrange(x, "... (k i) d -> ... k i d", i=self.block_size)
+        Y = torch.einsum("...kji,...kid->...kjd", right, X)
+        Z = torch.einsum("...jlk,...kjd->...ljd", left, Y)
+        z = rearrange(Z, "... l j d -> ... (l j) d")
 
-    def _get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
+        if self.pad_type == "pre":
+            return z[..., pad_amount:, :]
+        else:
+            return z[..., : -pad_amount or None, :]
+
+    def _get_matrix_from_factors(
+        self, left: Tensor, right: Tensor, pad_amount: int
+    ) -> Tensor:
         out = torch.einsum("...jlk,...kji->...ljki", left, right)
         out = rearrange(out, "... l j k i -> ... (l j) (k i)")
-        return out
 
-    def _mask_right(self, x: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
+        if self.pad_type == "pre":
+            return out[..., pad_amount:, pad_amount:]
+        else:
+            return out[..., : -pad_amount or None, : -pad_amount or None]
 
-        if valid_mask is None:
-            return x
+    def _get_valid_mask(self, attention_mask: Optional[Tensor]) -> Optional[Tensor]:
+        if attention_mask is not None:
+            attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
+        return attention_mask
 
-        # if self.pad_type == "pre":
-        #     x[..., 0, :, :pad_amount] = 0.0
-        # else:
-        #     x[..., -1, :, -pad_amount or x.shape[-1] :] = 0
-        # return x
+    def _mask_right(
+        self, right_params: Tensor, valid_mask: Optional[Tensor], pad_amount: int
+    ) -> Tensor:
+
+        # TODO: Check this
+        right_params_flat = rearrange(right_params, "... k j i -> ... j (k i)")
+
+        if self.pad_type == "pre":
+            right_params_flat[..., :pad_amount] = 0.0
+
+            if valid_mask is not None:
+                right_params_flat[..., pad_amount:] = (
+                    right_params_flat[..., pad_amount:] * valid_mask
+                )
+        else:
+            right_params_flat[..., -pad_amount or right_params_flat.shape[-1] :] = 0.0
+
+            if valid_mask is not None:
+                right_params_flat[..., : -pad_amount or None] = (
+                    right_params_flat[..., : -pad_amount or None] * valid_mask
+                )
+
+        right_params = rearrange(
+            right_params_flat, "... j (k i) -> ... k j i", i=self.block_size
+        )
+
+        return right_params
 
     def _grad(
         self,
@@ -228,35 +283,31 @@ class MonarchMHA(nn.Module):
         query: Tensor,
         key: Tensor,
         seq_len: int,
-        valid_mask: Optional[Tensor],
     ) -> Tuple[Tensor, Tensor]:
-        pad_amount = self._get_pad_amount(seq_len)
-        right_params = self._mask_right(right_params, valid_mask)
-        left_sphere = normalize(left_params, dim=-1)
-        right_sphere = normalize(right_params, dim=-1)
+        left_sphere = _safe_normalize(left_params, dim=-1)
+        right_sphere = _safe_normalize(right_params, dim=-1)
         left = left_sphere**2
         right = right_sphere**2
         d_left = (
             torch.einsum("...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left)
-            - torch.einsum("...kji,...lja,...kia->...jlk", right, query, key)
+            - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
         ) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
-        if self.renormalize:
-            d_left = d_left * _inv_norm(left_params)
+        d_left = d_left * _safe_inv_norm(left_params, dim=-1)
         d_right = (
             torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
-            - torch.einsum("...jlk,...lja,...kia->...kji", left, query, key)
+            - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
         ) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
-        if self.renormalize:
-            d_right = d_right * _inv_norm(right_params)
+        d_right = d_right * _safe_inv_norm(right_params, dim=-1)
         return d_left, d_right
 
-    def _get_factors(self, query: Tensor, key: Tensor) -> Tuple[Tensor, Tensor]:
-        batch_size = query.shape[:-2]
-        seq_len = query.shape[-2]
+    def _get_factors(
+        self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
+        batch_size, num_heads, seq_len, head_dim = query.shape
         pad_amount = self._get_pad_amount(seq_len)
         num_blocks = self._get_num_blocks(seq_len)
 
@@ -265,26 +316,62 @@ class MonarchMHA(nn.Module):
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
-        query = rearrange(query, "... (l j) a -> ... l j a", j=self.block_size)
-        key = rearrange(key, "... (k i) a -> ... k i a", i=self.block_size)
+        query = rearrange(query, "... (l j) d -> ... l j d", j=self.block_size)
+        key = rearrange(key, "... (k i) d -> ... k i d", i=self.block_size)
 
         left_params = _fast_simplex_init(
-            batch_size + (self.block_size, num_blocks, num_blocks), device=query.device
+            (batch_size, num_heads, self.block_size, num_blocks, num_blocks),
+            device=query.device,
         )
         right_params = _fast_simplex_init(
-            batch_size + (num_blocks, self.block_size, self.block_size),
+            (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
             device=query.device,
         )
 
         for _ in range(self.num_steps):
+            right_params = self._mask_right(right_params, valid_mask, pad_amount)
             d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key, seq_len
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
 
-        left = normalize(left_params, dim=-1) ** 2
-        right = normalize(self._mask(right_params, pad_amount), dim=-1) ** 2
+        left = _safe_normalize(left_params, dim=-1) ** 2
+        right = (
+            _safe_normalize(
+                self._mask_right(right_params, valid_mask, pad_amount), dim=-1
+            )
+            ** 2
+        )
 
         return left, right
-        return left, right
+
+
+def main():
+
+    import matplotlib.pyplot as plt
+    from entmax import sparsemax
+
+    mha = MonarchMHA(2, 100, 1e1, "pre")
+    query = torch.randn(1, 1, 16, 4)
+    key = torch.randn(1, 1, 16, 4)
+
+    attention_mask = torch.tensor([13 * [1] + 3 * [0]])
+
+    original_matrix = sparsemax(
+        query @ key.transpose(-1, -2) / sqrt(query.shape[-1])
+        + (1 - attention_mask[:, None, None, :]) * -1e9
+    )[  # type: ignore
+        0, 0
+    ]
+    efficient_matrix = mha.get_matrix(query, key, attention_mask)[0, 0]
+    print(efficient_matrix)
+
+    fig, axes = plt.subplots(1, 2)
+    axes[0].imshow(original_matrix)
+    axes[1].imshow(efficient_matrix)
+    plt.show()
+
+
+if __name__ == "__main__":
+    main()

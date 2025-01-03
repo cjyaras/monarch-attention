@@ -16,7 +16,7 @@ from transformers.models.roberta.modeling_roberta import (
 
 AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
 
-from sobalib.layers import LowRankAttention, MonarchAttention, PadType
+from sobalib.layers import LowRankMHA, MonarchMHA, MonarchPadType
 
 
 class CustomRobertaConfig(RobertaConfig):
@@ -28,7 +28,7 @@ class CustomRobertaConfig(RobertaConfig):
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
-        efficient_attention_pad_type: PadType = "pre",
+        efficient_attention_pad_type: MonarchPadType = "pre",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -59,7 +59,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                 rank = config.efficient_attention_rank
                 assert rank is not None
                 self.efficient_attn = torch.compile(
-                    LowRankAttention(
+                    LowRankMHA(
                         num_steps=num_steps,
                         step_size=step_size,
                         rank=rank,
@@ -72,7 +72,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
                 self.efficient_attn = torch.compile(
-                    MonarchAttention(
+                    MonarchMHA(
                         block_size=block_size,
                         num_steps=num_steps,
                         step_size=step_size,
@@ -150,8 +150,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
         elif self.attention_type in ["low-rank", "monarch"]:
-            # Moved head dim scaling to query
-            query_layer = query_layer / sqrt(self.attention_head_size)
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
