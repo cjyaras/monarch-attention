@@ -89,7 +89,7 @@ class LowRankMHA(nn.Module):
             attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
         return attention_mask
 
-    def _mask_right(self, right_params: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
+    def _mask(self, right_params: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
         if valid_mask is None:
             return right_params
         return right_params * valid_mask
@@ -106,17 +106,11 @@ class LowRankMHA(nn.Module):
         left_sphere = _safe_normalize(left_params, dim=-1)
         left = left_sphere**2
         right = right_sphere**2
-        d_left = (
-            torch.einsum("...jk,...ki,...li->...jl", left, right, right)
-            - torch.einsum("...jd,...id,...li->...jl", query, key, right)
-        ) / seq_len**2
+        d_left = (left @ (right @ right.mT) - query @ (key.mT @ right.mT)) / seq_len**2
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
-        d_right = (
-            torch.einsum("...jk,...jl,...li->...ki", left, left, right)
-            - torch.einsum("...jk,...jd,...id->...ki", left, query, key)
-        ) / seq_len**2
+        d_right = ((left.mT @ left) @ right - (left.mT @ query) @ key.mT) / seq_len**2
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
@@ -140,7 +134,7 @@ class LowRankMHA(nn.Module):
         )
 
         for _ in range(self.num_steps):
-            right_params = self._mask_right(right_params, valid_mask)
+            right_params = self._mask(right_params, valid_mask)
             d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key, seq_len
             )
@@ -148,12 +142,12 @@ class LowRankMHA(nn.Module):
             right_params = right_params - self.step_size * d_right_params
 
         left = _safe_normalize(left_params, dim=-1) ** 2
-        right = _safe_normalize(self._mask_right(right_params, valid_mask), dim=-1) ** 2
+        right = _safe_normalize(self._mask(right_params, valid_mask), dim=-1) ** 2
 
         return left, right
 
 
-MonarchPadType = Literal["pre", "post"]
+PadType = Literal["pre", "post"]
 
 
 class MonarchMHA(nn.Module):
@@ -163,15 +157,13 @@ class MonarchMHA(nn.Module):
         block_size: int,
         num_steps: int,
         step_size: float,
-        pad_type: MonarchPadType,
-        excess_padding: int = 0,
+        pad_type: PadType,
     ):
         super().__init__()
         self.block_size = block_size
         self.num_steps = num_steps
         self.step_size = step_size
         self.pad_type = pad_type
-        self.excess_padding = excess_padding
 
     def get_matrix(
         self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
@@ -206,8 +198,7 @@ class MonarchMHA(nn.Module):
         return self._multiply(left, right, value)
 
     def _get_num_blocks(self, seq_len: int) -> int:
-        excess_seq_len = seq_len + self.excess_padding
-        num_blocks = ceil(excess_seq_len / self.block_size)
+        num_blocks = ceil(seq_len / self.block_size)
         return num_blocks
 
     def _get_pad_amount(self, seq_len: int) -> int:
@@ -249,7 +240,7 @@ class MonarchMHA(nn.Module):
             attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
         return attention_mask
 
-    def _mask_right(
+    def _mask(
         self, right_params: Tensor, valid_mask: Optional[Tensor], pad_amount: int
     ) -> Tensor:
 
@@ -329,7 +320,7 @@ class MonarchMHA(nn.Module):
         )
 
         for _ in range(self.num_steps):
-            right_params = self._mask_right(right_params, valid_mask, pad_amount)
+            right_params = self._mask(right_params, valid_mask, pad_amount)
             d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key, seq_len
             )
@@ -338,13 +329,287 @@ class MonarchMHA(nn.Module):
 
         left = _safe_normalize(left_params, dim=-1) ** 2
         right = (
-            _safe_normalize(
-                self._mask_right(right_params, valid_mask, pad_amount), dim=-1
-            )
+            _safe_normalize(self._mask(right_params, valid_mask, pad_amount), dim=-1)
             ** 2
         )
 
         return left, right
+
+
+class BlockDiagLowRankMHA(nn.Module):
+
+    def __init__(
+        self,
+        block_size: int,
+        rank: int,
+        num_steps: int,
+        step_size: float,
+        pad_type: PadType,
+    ):
+        super().__init__()
+        self.block_size = block_size
+        self.rank = rank
+        self.num_steps = num_steps
+        self.step_size = step_size
+        self.pad_type = pad_type
+
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
+        assert query.shape == key.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
+
+        query = query / sqrt(head_dim)
+        pad_amount = self._get_pad_amount(seq_len)
+        valid_mask = self._get_valid_mask(attention_mask)
+        block_diag, left, right = self._get_factors(query, key, valid_mask)
+        matrix = self._get_matrix_from_factors(block_diag, left, right, pad_amount)
+        return matrix
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        assert query.shape == key.shape and key.shape == value.shape
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        if attention_mask is not None:
+            assert attention_mask.shape == (batch_size, seq_len)
+
+        query = query / sqrt(head_dim)
+        valid_mask = self._get_valid_mask(attention_mask)
+        block_diag, left, right = self._get_factors(query, key, valid_mask)
+        return self._multiply(block_diag, left, right, value)
+
+    def _get_num_blocks(self, seq_len: int) -> int:
+        num_blocks = ceil(seq_len / self.block_size)
+        return num_blocks
+
+    def _get_pad_amount(self, seq_len: int) -> int:
+        num_blocks = self._get_num_blocks(seq_len)
+        seq_len_padded = self.block_size * num_blocks
+        pad_amount = seq_len_padded - seq_len
+        return pad_amount
+
+    def _multiply(
+        self, block_diag: Tensor, left: Tensor, right: Tensor, inputs: Tensor
+    ) -> Tensor:
+        seq_len = inputs.shape[-2]
+        pad_amount = self._get_pad_amount(seq_len)
+        pad_t = (0, 0) + (
+            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        )
+
+        x = pad(inputs, pad_t)
+        X = rearrange(x, "... (k i) d -> ... k i d", i=self.block_size)
+        Y = torch.einsum("...kji,...kid->...kjd", block_diag, X)
+        y = rearrange(Y, "... k j d -> ... (k j) d")
+        z = y + left @ (right @ x)
+
+        if self.pad_type == "pre":
+            return z[..., pad_amount:, :]
+        else:
+            return z[..., : -pad_amount or None, :]
+
+    def _get_matrix_from_factors(
+        self, block_diag: Tensor, left: Tensor, right: Tensor, pad_amount: int
+    ) -> Tensor:
+        num_blocks = self._get_num_blocks(right.shape[-1])
+        block_diag_out = torch.einsum(
+            "...jlk,...kji->...ljki",
+            torch.eye(num_blocks).expand(
+                block_diag.shape[:-3] + (self.block_size, num_blocks, num_blocks)
+            ),
+            block_diag,
+        )
+        block_diag_out = rearrange(block_diag_out, "... l j k i -> ... (l j) (k i)")
+        low_rank_out = left @ right
+        out = block_diag_out + low_rank_out
+
+        if self.pad_type == "pre":
+            return out[..., pad_amount:, pad_amount:]
+        else:
+            return out[..., : -pad_amount or None, : -pad_amount or None]
+
+    def _get_valid_mask(self, attention_mask: Optional[Tensor]) -> Optional[Tensor]:
+        if attention_mask is not None:
+            attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
+        return attention_mask
+
+    def _mask(
+        self,
+        block_diag_flat_and_left_params: Tensor,
+        right_params: Tensor,
+        valid_mask: Optional[Tensor],
+        pad_amount: int,
+    ) -> Tuple[Tensor, Tensor]:
+
+        block_diag_flat_params = block_diag_flat_and_left_params[..., : self.block_size]
+        left_params = block_diag_flat_and_left_params[..., self.block_size :]
+
+        block_diag_flat_params_transposed = rearrange(
+            block_diag_flat_params, "... (k j) i -> ... j (k i)", j=self.block_size
+        )
+
+        if self.pad_type == "pre":
+            block_diag_flat_params_transposed[..., :pad_amount] = 0.0
+            right_params[..., :pad_amount] = 0.0
+
+            if valid_mask is not None:
+                block_diag_flat_params_transposed[..., pad_amount:] = (
+                    block_diag_flat_params_transposed[..., pad_amount:] * valid_mask
+                )
+                right_params[..., pad_amount:] = (
+                    right_params[..., pad_amount:] * valid_mask
+                )
+        else:
+            block_diag_flat_params_transposed[
+                ..., -pad_amount or block_diag_flat_params_transposed.shape[-1] :
+            ] = 0.0
+            right_params[..., -pad_amount or right_params.shape[-1] :] = 0.0
+
+            if valid_mask is not None:
+                block_diag_flat_params_transposed[..., : -pad_amount or None] = (
+                    block_diag_flat_params_transposed[..., : -pad_amount or None]
+                    * valid_mask
+                )
+                right_params[..., : -pad_amount or None] = (
+                    right_params[..., : -pad_amount or None] * valid_mask
+                )
+
+        block_diag_flat_params = rearrange(
+            block_diag_flat_params_transposed,
+            "... j (k i) -> ... (k j) i",
+            i=self.block_size,
+        )
+
+        block_diag_flat_and_left_params = torch.cat(
+            [block_diag_flat_params, left_params], dim=-1
+        )
+        return block_diag_flat_and_left_params, right_params
+
+    def _grad(
+        self,
+        block_diag_flat_and_left_params: Tensor,
+        right_params: Tensor,
+        query: Tensor,
+        key: Tensor,
+        seq_len: int,
+    ) -> Tuple[Tensor, Tensor]:
+        block_diag_flat_and_left_sphere = _safe_normalize(
+            block_diag_flat_and_left_params, dim=-1
+        )
+        right_sphere = _safe_normalize(right_params, dim=-1)
+
+        block_diag_flat_and_left = block_diag_flat_and_left_sphere**2
+        right = right_sphere**2
+
+        block_diag_flat = block_diag_flat_and_left[..., : self.block_size]
+        left = block_diag_flat_and_left[..., self.block_size :]
+
+        block_diag = rearrange(
+            block_diag_flat, "... (k j) i -> ... k j i", j=self.block_size
+        )
+
+        blocked_left = rearrange(left, "... (m b) r -> ... m b r", b=self.block_size)
+        blocked_right = rearrange(right, "... r (m b) -> ... m r b", b=self.block_size)
+        blocked_query = rearrange(query, "... (m b) d -> ... m b d", b=self.block_size)
+        blocked_key = rearrange(key, "... (m b) d -> ... m b d", b=self.block_size)
+
+        d_block_diag = (
+            block_diag + blocked_left @ blocked_right - blocked_query @ blocked_key.mT
+        ) / seq_len**2
+
+        d_left = (
+            rearrange(
+                block_diag
+                @ rearrange(right, "... r (m b) -> ... m b r", b=self.block_size),
+                "... m b r -> ... (m b) r",
+            )
+            + left @ (right @ right.mT)
+            - query @ (key.mT @ right.mT)
+        ) / seq_len**2
+
+        d_block_diag_flat = rearrange(d_block_diag, "... k j i -> ... (k j) i")
+        d_block_diag_flat_and_left = torch.cat([d_block_diag_flat, d_left], dim=-1)
+        d_block_diag_flat_and_left = (
+            d_block_diag_flat_and_left * 2 * block_diag_flat_and_left_sphere
+        )
+        d_block_diag_flat_and_left = d_block_diag_flat_and_left - _project(
+            block_diag_flat_and_left_sphere, d_block_diag_flat_and_left
+        )
+        d_block_diag_flat_and_left = d_block_diag_flat_and_left * _safe_inv_norm(
+            block_diag_flat_and_left_params, dim=-1
+        )
+
+        d_right = (
+            rearrange(
+                rearrange(left, "... (m b) r -> ... m r b", b=self.block_size)
+                @ block_diag,
+                "... m r b -> ... r (m b)",
+            )
+            + (left.mT @ left) @ right
+            - (left.mT @ query) @ key.mT
+        ) / seq_len**2
+        d_right = d_right * 2 * right_sphere
+        d_right = d_right - _project(right_sphere, d_right)
+        d_right = d_right * _safe_inv_norm(right_params, dim=-1)
+
+        return d_block_diag_flat_and_left, d_right
+
+    def _get_factors(
+        self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor, Tensor]:
+        batch_size, num_heads, seq_len, head_dim = query.shape
+        pad_amount = self._get_pad_amount(seq_len)
+        padded_seq_len = seq_len + pad_amount
+
+        pad_t = (0, 0) + (
+            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+        )
+        query = pad(query, pad_t)
+        key = pad(key, pad_t)
+
+        block_diag_flat_and_left_params = _fast_simplex_init(
+            (batch_size, num_heads, padded_seq_len, self.block_size + self.rank),
+            perturb_scale=1e-3,
+            device=query.device,
+        )
+
+        right_params = _fast_simplex_init(
+            (batch_size, num_heads, self.rank, padded_seq_len),
+            perturb_scale=1e-3,
+            device=query.device,
+        )
+
+        for _ in range(self.num_steps):
+            block_diag_flat_and_left_params, right_params = self._mask(
+                block_diag_flat_and_left_params, right_params, valid_mask, pad_amount
+            )
+            d_block_diag_flat_and_left_params, d_right_params = self._grad(
+                block_diag_flat_and_left_params, right_params, query, key, seq_len
+            )
+            block_diag_flat_and_left_params = (
+                block_diag_flat_and_left_params
+                - self.step_size * d_block_diag_flat_and_left_params
+            )
+            right_params = right_params - self.step_size * d_right_params
+
+        block_diag_flat_and_left = (
+            _safe_normalize(block_diag_flat_and_left_params, dim=-1) ** 2
+        )
+        block_diag_flat = block_diag_flat_and_left[..., : self.block_size]
+        left = block_diag_flat_and_left[..., self.block_size :]
+        block_diag = rearrange(
+            block_diag_flat, "... (k j) i -> ... k j i", j=self.block_size
+        )
+        right = _safe_normalize(right_params, dim=-1) ** 2
+
+        return block_diag, left, right
 
 
 def main():

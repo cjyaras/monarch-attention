@@ -13,7 +13,7 @@ from transformers.models.vit.modeling_vit import (
 
 AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
 
-from sobalib.layers import LowRankMHA, MonarchMHA, MonarchPadType
+from sobalib.layers import LowRankMHA, MonarchMHA, PadType
 
 
 class CustomViTConfig(ViTConfig):
@@ -25,7 +25,7 @@ class CustomViTConfig(ViTConfig):
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
-        efficient_attention_pad_type: MonarchPadType = "pre",
+        efficient_attention_pad_type: PadType = "pre",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -66,14 +66,20 @@ class CustomViTSelfAttention(ViTSelfAttention):
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchMHA(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    ),
-                    mode="max-autotune",
+                # self.efficient_attn = torch.compile(
+                #     MonarchMHA(
+                #         block_size=block_size,
+                #         num_steps=num_steps,
+                #         step_size=step_size,
+                #         pad_type=pad_type,  # type: ignore
+                #     ),
+                #     # mode="max-autotune",
+                # )
+                self.efficient_attn = MonarchMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,  # type: ignore
                 )
 
         if config.scale_attention_temperature:
@@ -154,5 +160,5 @@ class CustomViTForImageClassification(ViTForImageClassification):
 
     def __init__(self, config: CustomViTConfig):
         super().__init__(config)
-        self.vit = CustomViTModel(config)
+        self.vit = CustomViTModel(config, add_pooling_layer=False)
         self.post_init()

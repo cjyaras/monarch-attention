@@ -16,9 +16,11 @@ from transformers.models.roberta.modeling_roberta import (
     RobertaSelfAttention,
 )
 
-AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
+AttentionType = Literal[
+    "softmax", "sparsemax", "low-rank", "monarch", "block-diag-low-rank"
+]
 
-from sobalib.layers import LowRankMHA, MonarchMHA, MonarchPadType
+from sobalib.layers import BlockDiagLowRankMHA, LowRankMHA, MonarchMHA, PadType
 
 
 class CustomRobertaConfig(RobertaConfig):
@@ -30,7 +32,7 @@ class CustomRobertaConfig(RobertaConfig):
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
-        efficient_attention_pad_type: MonarchPadType = "pre",
+        efficient_attention_pad_type: PadType = "pre",
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -52,7 +54,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
 
         self.attention_type = config.attention_type
 
-        if self.attention_type in ["low-rank", "monarch"]:
+        if self.attention_type in ["low-rank", "monarch", "block-diag-low-rank"]:
             num_steps = config.efficient_attention_num_steps
             step_size = config.efficient_attention_step_size
             assert num_steps is not None and step_size is not None
@@ -69,7 +71,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                     mode="reduce-overhead",
                 )
 
-            else:
+            elif self.attention_type == "monarch":
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
@@ -87,6 +89,17 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                     num_steps=num_steps,
                     step_size=step_size,
                     pad_type=pad_type,  # type: ignore
+                )
+
+            else:
+                block_size = config.efficient_attention_block_size
+                rank = config.efficient_attention_rank
+                pad_type = config.efficient_attention_pad_type
+                assert (
+                    block_size is not None and pad_type is not None and rank is not None
+                )
+                self.efficient_attn = BlockDiagLowRankMHA(
+                    block_size, rank, num_steps, step_size, pad_type  # type: ignore
                 )
 
         if config.scale_attention_temperature:
@@ -157,7 +170,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             )
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
-        elif self.attention_type in ["low-rank", "monarch"]:
+        elif self.attention_type in ["low-rank", "monarch", "block-diag-low-rank"]:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
