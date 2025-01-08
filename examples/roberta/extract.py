@@ -9,7 +9,7 @@ from roberta.models import CustomRobertaConfig, CustomRobertaForMaskedLM
 from transformers import RobertaTokenizer, pipeline
 from transformers.utils import logging
 
-from sobalib.layers import BlockDiagLowRankMHA, LowRankMHA, MonarchMHA
+from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA
 
 logging.set_verbosity_error()
 
@@ -75,6 +75,11 @@ key = torch.stack(
     dim=0,
 ).transpose(1, 0)
 
+import numpy as np
+
+np.save("query.npy", query.cpu().numpy())
+np.save("key.npy", key.cpu().numpy())
+
 
 with torch.no_grad():
     # layer, head = 0, 0
@@ -87,8 +92,8 @@ with torch.no_grad():
     key = key[0, layer, head][None, None]
 
     attn_scores = (query @ key.transpose(-1, -2) / sqrt(query.shape[-1]))[0, 0]
-    # efficient_attn = MonarchMHA(16, 100, 1e4, "pre")
-    efficient_attn = BlockDiagLowRankMHA(16, 8, 10, 5e4, "pre")
+    # efficient_attn = MonarchMHA(16, 1, 5e0, "pre")
+    efficient_attn = MonarchBlockDiagonalMHA(16, 100, 5e0, "pre")
     # efficient_attn = LowRankMHA(16, 100, 8e4)
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))

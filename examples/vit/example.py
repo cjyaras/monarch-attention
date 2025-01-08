@@ -15,7 +15,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 ds = load_dataset("imagenet-1k", split="validation", streaming=True)
 assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(5)
+ds_examples = ds.take(50)
 images = [item["image"] for item in ds_examples]
 labels = [item["label"] for item in ds_examples]
 
@@ -25,7 +25,7 @@ image_processor = ViTImageProcessor.from_pretrained(
 
 base_config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
 
-top_k = 3
+top_k = 5
 
 # Softmax
 
@@ -74,7 +74,7 @@ assert isinstance(config, CustomViTConfig)
 config.attention_type = "monarch"
 config.scale_attention_temperature = True
 config.efficient_attention_num_steps = 3
-config.efficient_attention_step_size = 1e5
+config.efficient_attention_step_size = 2.6
 config.efficient_attention_block_size = 14
 model = CustomViTForImageClassification.from_pretrained(
     "google/vit-base-patch16-224", config=config
@@ -118,14 +118,26 @@ with FlopTensorDispatchMode(model) as ftdm:
 assert isinstance(softmax_outputs, List)
 assert isinstance(monarch_outputs, List)
 
+softmax_num_correct = 0
+monarch_num_correct = 0
+
 for i in range(len(images)):
     print("Softmax:")
-    print(softmax_outputs[i][:top_k])
+    softmax_labels = [x["label"] for x in softmax_outputs[i][:top_k]]
+    print(" | ".join(softmax_labels))
     print("Monarch:")
-    print(monarch_outputs[i][:top_k])
+    monarch_labels = [x["label"] for x in monarch_outputs[i][:top_k]]
+    print(" | ".join(monarch_labels))
     print(f"True: {model.config.id2label[labels[i]]}")
     print()
+
+    if model.config.id2label[labels[i]] in softmax_labels:
+        softmax_num_correct += 1
+    if model.config.id2label[labels[i]] in monarch_labels:
+        monarch_num_correct += 1
 
 print(
     f"Monarch to Softmax FLOP ratio: {monarch_flops:0.2e}/{softmax_flops:0.2e} ({monarch_flops / softmax_flops * 100:0.2f}%)"
 )
+print(f"Softmax accuracy: {softmax_num_correct / len(images) * 100:.2f}%")
+print(f"Monarch accuracy: {monarch_num_correct / len(images) * 100:.2f}%")

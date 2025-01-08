@@ -11,9 +11,11 @@ from transformers.models.vit.modeling_vit import (
     ViTSelfAttention,
 )
 
-AttentionType = Literal["softmax", "sparsemax", "low-rank", "monarch"]
+AttentionType = Literal[
+    "softmax", "sparsemax", "low-rank", "monarch", "monarch-block-diagonal"
+]
 
-from sobalib.layers import LowRankMHA, MonarchMHA, PadType
+from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA, PadType
 
 
 class CustomViTConfig(ViTConfig):
@@ -45,7 +47,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
         super().__init__(config)
         self.attention_type = config.attention_type
 
-        if self.attention_type in ["low-rank", "monarch"]:
+        if self.attention_type in ["low-rank", "monarch", "monarch-block-diagonal"]:
             num_steps = config.efficient_attention_num_steps
             step_size = config.efficient_attention_step_size
             assert num_steps is not None and step_size is not None
@@ -62,7 +64,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     mode="max-autotune",
                 )
 
-            else:
+            elif self.attention_type == "monarch":
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
@@ -80,6 +82,13 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     num_steps=num_steps,
                     step_size=step_size,
                     pad_type=pad_type,  # type: ignore
+                )
+            else:
+                block_size = config.efficient_attention_block_size
+                pad_type = config.efficient_attention_pad_type
+                assert block_size is not None and pad_type is not None
+                self.efficient_attn = MonarchBlockDiagonalMHA(
+                    block_size, num_steps, step_size, pad_type  # type: ignore
                 )
 
         if config.scale_attention_temperature:
@@ -132,7 +141,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
             )
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
-        elif self.attention_type in ["low-rank", "monarch"]:
+        else:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()

@@ -17,10 +17,10 @@ from transformers.models.roberta.modeling_roberta import (
 )
 
 AttentionType = Literal[
-    "softmax", "sparsemax", "low-rank", "monarch", "block-diag-low-rank"
+    "softmax", "sparsemax", "low-rank", "monarch", "monarch-block-diagonal"
 ]
 
-from sobalib.layers import BlockDiagLowRankMHA, LowRankMHA, MonarchMHA, PadType
+from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA, PadType
 
 
 class CustomRobertaConfig(RobertaConfig):
@@ -54,7 +54,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
 
         self.attention_type = config.attention_type
 
-        if self.attention_type in ["low-rank", "monarch", "block-diag-low-rank"]:
+        if self.attention_type in ["low-rank", "monarch", "monarch-block-diagonal"]:
             num_steps = config.efficient_attention_num_steps
             step_size = config.efficient_attention_step_size
             assert num_steps is not None and step_size is not None
@@ -93,13 +93,10 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
 
             else:
                 block_size = config.efficient_attention_block_size
-                rank = config.efficient_attention_rank
                 pad_type = config.efficient_attention_pad_type
-                assert (
-                    block_size is not None and pad_type is not None and rank is not None
-                )
-                self.efficient_attn = BlockDiagLowRankMHA(
-                    block_size, rank, num_steps, step_size, pad_type  # type: ignore
+                assert block_size is not None and pad_type is not None
+                self.efficient_attn = MonarchBlockDiagonalMHA(
+                    block_size, num_steps, step_size, pad_type  # type: ignore
                 )
 
         if config.scale_attention_temperature:
@@ -170,7 +167,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             )
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
-        elif self.attention_type in ["low-rank", "monarch", "block-diag-low-rank"]:
+        else:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()

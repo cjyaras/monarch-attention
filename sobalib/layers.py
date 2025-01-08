@@ -1,4 +1,4 @@
-from math import ceil, sqrt
+from math import ceil, prod, sqrt
 from typing import Literal, Optional, Tuple
 
 import torch
@@ -100,17 +100,16 @@ class LowRankMHA(nn.Module):
         right_params: Tensor,
         query: Tensor,
         key: Tensor,
-        seq_len: int,
     ) -> Tuple[Tensor, Tensor]:
         right_sphere = _safe_normalize(right_params, dim=-1)
         left_sphere = _safe_normalize(left_params, dim=-1)
         left = left_sphere**2
         right = right_sphere**2
-        d_left = (left @ (right @ right.mT) - query @ (key.mT @ right.mT)) / seq_len**2
+        d_left = left @ (right @ right.mT) - query @ (key.mT @ right.mT)
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
-        d_right = ((left.mT @ left) @ right - (left.mT @ query) @ key.mT) / seq_len**2
+        d_right = (left.mT @ left) @ right - (left.mT @ query) @ key.mT
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
@@ -121,7 +120,6 @@ class LowRankMHA(nn.Module):
     ) -> Tuple[Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
-        # Need small perturbation to break symmetry
         left_params = _fast_simplex_init(
             (batch_size, num_heads, seq_len, self.rank),
             perturb_scale=1e-3,
@@ -136,7 +134,7 @@ class LowRankMHA(nn.Module):
         for _ in range(self.num_steps):
             right_params = self._mask(right_params, valid_mask)
             d_left_params, d_right_params = self._grad(
-                left_params, right_params, query, key, seq_len
+                left_params, right_params, query, key
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
@@ -243,7 +241,6 @@ class MonarchMHA(nn.Module):
     def _mask(
         self, right_params: Tensor, valid_mask: Optional[Tensor], pad_amount: int
     ) -> Tensor:
-
         right_params_flat = rearrange(right_params, "... k j i -> ... j (k i)")
 
         if self.pad_type == "pre":
@@ -273,23 +270,20 @@ class MonarchMHA(nn.Module):
         right_params: Tensor,
         query: Tensor,
         key: Tensor,
-        seq_len: int,
     ) -> Tuple[Tensor, Tensor]:
         left_sphere = _safe_normalize(left_params, dim=-1)
         right_sphere = _safe_normalize(right_params, dim=-1)
         left = left_sphere**2
         right = right_sphere**2
-        d_left = (
-            torch.einsum("...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left)
-            - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
-        ) / seq_len**2
+        d_left = torch.einsum(
+            "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
+        ) - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
-        d_right = (
-            torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
-            - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
-        ) / seq_len**2
+        d_right = torch.einsum(
+            "...jk,...kji->...kji", torch.sum(left**2, dim=-2), right
+        ) - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
@@ -322,7 +316,7 @@ class MonarchMHA(nn.Module):
         for _ in range(self.num_steps):
             right_params = self._mask(right_params, valid_mask, pad_amount)
             d_left_params, d_right_params = self._grad(
-                left_params, right_params, query, key, seq_len
+                left_params, right_params, query, key
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
@@ -336,19 +330,17 @@ class MonarchMHA(nn.Module):
         return left, right
 
 
-class BlockDiagLowRankMHA(nn.Module):
+class MonarchBlockDiagonalMHA(nn.Module):
 
     def __init__(
         self,
         block_size: int,
-        rank: int,
         num_steps: int,
         step_size: float,
         pad_type: PadType,
     ):
         super().__init__()
         self.block_size = block_size
-        self.rank = rank
         self.num_steps = num_steps
         self.step_size = step_size
         self.pad_type = pad_type
@@ -406,9 +398,11 @@ class BlockDiagLowRankMHA(nn.Module):
 
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) d -> ... k i d", i=self.block_size)
-        Y = torch.einsum("...kji,...kid->...kjd", block_diag, X)
-        y = rearrange(Y, "... k j d -> ... (k j) d")
-        z = y + left @ (right @ x)
+
+        Y = torch.einsum("...kji,...kid->...kjd", right, X)
+        Z = torch.einsum("...jlk,...kjd->...ljd", left, Y)
+        Z = Z + torch.einsum("...ljk,...lkd->...ljd", block_diag, X)
+        z = rearrange(Z, "... l j d -> ... (l j) d")
 
         if self.pad_type == "pre":
             return z[..., pad_amount:, :]
@@ -418,7 +412,7 @@ class BlockDiagLowRankMHA(nn.Module):
     def _get_matrix_from_factors(
         self, block_diag: Tensor, left: Tensor, right: Tensor, pad_amount: int
     ) -> Tensor:
-        num_blocks = self._get_num_blocks(right.shape[-1])
+        num_blocks = self._get_num_blocks(prod(right.shape[-3:-1]))
         block_diag_out = torch.einsum(
             "...jlk,...kji->...ljki",
             torch.eye(num_blocks).expand(
@@ -426,9 +420,12 @@ class BlockDiagLowRankMHA(nn.Module):
             ),
             block_diag,
         )
-        block_diag_out = rearrange(block_diag_out, "... l j k i -> ... (l j) (k i)")
-        low_rank_out = left @ right
-        out = block_diag_out + low_rank_out
+        monarch_out = torch.einsum("...jlk,...kji->...ljki", left, right)
+
+        out = rearrange(
+            block_diag_out + monarch_out,
+            "... l j k i -> ... (l j) (k i)",
+        )
 
         if self.pad_type == "pre":
             return out[..., pad_amount:, pad_amount:]
@@ -442,43 +439,51 @@ class BlockDiagLowRankMHA(nn.Module):
 
     def _mask(
         self,
-        block_diag_flat_and_left_params: Tensor,
+        block_diag_flat_and_left_flat_params: Tensor,
         right_params: Tensor,
         valid_mask: Optional[Tensor],
         pad_amount: int,
     ) -> Tuple[Tensor, Tensor]:
 
-        block_diag_flat_params = block_diag_flat_and_left_params[..., : self.block_size]
-        left_params = block_diag_flat_and_left_params[..., self.block_size :]
+        block_diag_flat_params = block_diag_flat_and_left_flat_params[
+            ..., : self.block_size
+        ]
+        left_flat_params = block_diag_flat_and_left_flat_params[..., self.block_size :]
 
         block_diag_flat_params_transposed = rearrange(
             block_diag_flat_params, "... (k j) i -> ... j (k i)", j=self.block_size
         )
+        right_flat_params_transposed = rearrange(
+            right_params, "... k j i -> ... j (k i)"
+        )
 
         if self.pad_type == "pre":
             block_diag_flat_params_transposed[..., :pad_amount] = 0.0
-            right_params[..., :pad_amount] = 0.0
+            right_flat_params_transposed[..., :pad_amount] = 0.0
 
             if valid_mask is not None:
                 block_diag_flat_params_transposed[..., pad_amount:] = (
                     block_diag_flat_params_transposed[..., pad_amount:] * valid_mask
                 )
-                right_params[..., pad_amount:] = (
-                    right_params[..., pad_amount:] * valid_mask
+                right_flat_params_transposed[..., pad_amount:] = (
+                    right_flat_params_transposed[..., pad_amount:] * valid_mask
                 )
         else:
             block_diag_flat_params_transposed[
                 ..., -pad_amount or block_diag_flat_params_transposed.shape[-1] :
             ] = 0.0
-            right_params[..., -pad_amount or right_params.shape[-1] :] = 0.0
+            right_flat_params_transposed[
+                ..., -pad_amount or right_flat_params_transposed.shape[-1] :
+            ] = 0.0
 
             if valid_mask is not None:
                 block_diag_flat_params_transposed[..., : -pad_amount or None] = (
                     block_diag_flat_params_transposed[..., : -pad_amount or None]
                     * valid_mask
                 )
-                right_params[..., : -pad_amount or None] = (
-                    right_params[..., : -pad_amount or None] * valid_mask
+                right_flat_params_transposed[..., : -pad_amount or None] = (
+                    right_flat_params_transposed[..., : -pad_amount or None]
+                    * valid_mask
                 )
 
         block_diag_flat_params = rearrange(
@@ -487,85 +492,88 @@ class BlockDiagLowRankMHA(nn.Module):
             i=self.block_size,
         )
 
-        block_diag_flat_and_left_params = torch.cat(
-            [block_diag_flat_params, left_params], dim=-1
+        right_params = rearrange(
+            right_flat_params_transposed, "... j (k i) -> ... k j i", i=self.block_size
         )
-        return block_diag_flat_and_left_params, right_params
+
+        block_diag_flat_and_left_flat_params = torch.cat(
+            [block_diag_flat_params, left_flat_params], dim=-1
+        )
+        return block_diag_flat_and_left_flat_params, right_params
 
     def _grad(
         self,
-        block_diag_flat_and_left_params: Tensor,
+        block_diag_flat_and_left_flat_params: Tensor,
         right_params: Tensor,
         query: Tensor,
         key: Tensor,
-        seq_len: int,
     ) -> Tuple[Tensor, Tensor]:
-        block_diag_flat_and_left_sphere = _safe_normalize(
-            block_diag_flat_and_left_params, dim=-1
+        num_blocks = right_params.shape[-3]
+        block_diag_flat_and_left_flat_sphere = _safe_normalize(
+            block_diag_flat_and_left_flat_params, dim=-1
         )
         right_sphere = _safe_normalize(right_params, dim=-1)
 
-        block_diag_flat_and_left = block_diag_flat_and_left_sphere**2
+        block_diag_flat_and_left_flat = block_diag_flat_and_left_flat_sphere**2
         right = right_sphere**2
 
-        block_diag_flat = block_diag_flat_and_left[..., : self.block_size]
-        left = block_diag_flat_and_left[..., self.block_size :]
+        block_diag_flat = block_diag_flat_and_left_flat[..., : self.block_size]
+        left_flat = block_diag_flat_and_left_flat[..., self.block_size :]
 
         block_diag = rearrange(
             block_diag_flat, "... (k j) i -> ... k j i", j=self.block_size
         )
 
-        blocked_left = rearrange(left, "... (m b) r -> ... m b r", b=self.block_size)
-        blocked_right = rearrange(right, "... r (m b) -> ... m r b", b=self.block_size)
-        blocked_query = rearrange(query, "... (m b) d -> ... m b d", b=self.block_size)
-        blocked_key = rearrange(key, "... (m b) d -> ... m b d", b=self.block_size)
+        left = rearrange(left_flat, "... (l j) k -> ... j l k", j=self.block_size)
 
         d_block_diag = (
-            block_diag + blocked_left @ blocked_right - blocked_query @ blocked_key.mT
-        ) / seq_len**2
-
-        d_left = (
-            rearrange(
-                block_diag
-                @ rearrange(right, "... r (m b) -> ... m b r", b=self.block_size),
-                "... m b r -> ... (m b) r",
-            )
-            + left @ (right @ right.mT)
-            - query @ (key.mT @ right.mT)
-        ) / seq_len**2
-
-        d_block_diag_flat = rearrange(d_block_diag, "... k j i -> ... (k j) i")
-        d_block_diag_flat_and_left = torch.cat([d_block_diag_flat, d_left], dim=-1)
-        d_block_diag_flat_and_left = (
-            d_block_diag_flat_and_left * 2 * block_diag_flat_and_left_sphere
+            block_diag
+            + torch.einsum("...jkk->...kj", left)[..., None] * right
+            - query @ key.mT
         )
-        d_block_diag_flat_and_left = d_block_diag_flat_and_left - _project(
-            block_diag_flat_and_left_sphere, d_block_diag_flat_and_left
-        )
-        d_block_diag_flat_and_left = d_block_diag_flat_and_left * _safe_inv_norm(
-            block_diag_flat_and_left_params, dim=-1
+
+        d_left = torch.einsum(
+            "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
+        ) - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
+
+        d_left[..., torch.arange(num_blocks), torch.arange(num_blocks)] += torch.einsum(
+            "...ijk,...ijk->...ji", right, block_diag
         )
 
         d_right = (
-            rearrange(
-                rearrange(left, "... (m b) r -> ... m r b", b=self.block_size)
-                @ block_diag,
-                "... m r b -> ... r (m b)",
-            )
-            + (left.mT @ left) @ right
-            - (left.mT @ query) @ key.mT
-        ) / seq_len**2
+            torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
+            - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
+            + torch.einsum("...jii,...ijk->...ijk", left, block_diag)
+        )
+
+        d_block_diag_flat = rearrange(d_block_diag, "... k j i -> ... (k j) i")
+        d_left_flat = rearrange(d_left, "... j l k -> ... (l j) k")
+        d_block_diag_flat_and_left_flat = torch.cat(
+            [d_block_diag_flat, d_left_flat], dim=-1
+        )
+        d_block_diag_flat_and_left_flat = (
+            d_block_diag_flat_and_left_flat * 2 * block_diag_flat_and_left_flat_sphere
+        )
+        d_block_diag_flat_and_left_flat = d_block_diag_flat_and_left_flat - _project(
+            block_diag_flat_and_left_flat_sphere, d_block_diag_flat_and_left_flat
+        )
+        d_block_diag_flat_and_left_flat = (
+            d_block_diag_flat_and_left_flat
+            * _safe_inv_norm(block_diag_flat_and_left_flat_params, dim=-1)
+        )
+
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
 
-        return d_block_diag_flat_and_left, d_right
+        return d_block_diag_flat_and_left_flat, d_right
 
     def _get_factors(
         self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
     ) -> Tuple[Tensor, Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
         pad_amount = self._get_pad_amount(seq_len)
+        num_blocks = self._get_num_blocks(seq_len)
         padded_seq_len = seq_len + pad_amount
 
         pad_t = (0, 0) + (
@@ -573,42 +581,45 @@ class BlockDiagLowRankMHA(nn.Module):
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
+        query = rearrange(query, "... (l j) d -> ... l j d", j=self.block_size)
+        key = rearrange(key, "... (k i) d -> ... k i d", i=self.block_size)
 
-        block_diag_flat_and_left_params = _fast_simplex_init(
-            (batch_size, num_heads, padded_seq_len, self.block_size + self.rank),
-            perturb_scale=1e-3,
+        block_diag_flat_and_left_flat_params = _fast_simplex_init(
+            (batch_size, num_heads, padded_seq_len, self.block_size + num_blocks),
             device=query.device,
         )
 
         right_params = _fast_simplex_init(
-            (batch_size, num_heads, self.rank, padded_seq_len),
-            perturb_scale=1e-3,
+            (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
             device=query.device,
         )
 
         for _ in range(self.num_steps):
-            block_diag_flat_and_left_params, right_params = self._mask(
-                block_diag_flat_and_left_params, right_params, valid_mask, pad_amount
+            block_diag_flat_and_left_flat_params, right_params = self._mask(
+                block_diag_flat_and_left_flat_params,
+                right_params,
+                valid_mask,
+                pad_amount,
             )
-            d_block_diag_flat_and_left_params, d_right_params = self._grad(
-                block_diag_flat_and_left_params, right_params, query, key, seq_len
+            d_block_diag_flat_and_left_flat_params, d_right_params = self._grad(
+                block_diag_flat_and_left_flat_params, right_params, query, key
             )
-            block_diag_flat_and_left_params = (
-                block_diag_flat_and_left_params
-                - self.step_size * d_block_diag_flat_and_left_params
+            block_diag_flat_and_left_flat_params = (
+                block_diag_flat_and_left_flat_params
+                - self.step_size * d_block_diag_flat_and_left_flat_params
             )
             right_params = right_params - self.step_size * d_right_params
 
-        block_diag_flat_and_left = (
-            _safe_normalize(block_diag_flat_and_left_params, dim=-1) ** 2
+        block_diag_flat_and_left_flat = (
+            _safe_normalize(block_diag_flat_and_left_flat_params, dim=-1) ** 2
         )
-        block_diag_flat = block_diag_flat_and_left[..., : self.block_size]
-        left = block_diag_flat_and_left[..., self.block_size :]
+        block_diag_flat = block_diag_flat_and_left_flat[..., : self.block_size]
+        left_flat = block_diag_flat_and_left_flat[..., self.block_size :]
         block_diag = rearrange(
             block_diag_flat, "... (k j) i -> ... k j i", j=self.block_size
         )
+        left = rearrange(left_flat, "... (l j) k -> ... j l k", j=self.block_size)
         right = _safe_normalize(right_params, dim=-1) ** 2
-
         return block_diag, left, right
 
 
