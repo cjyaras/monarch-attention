@@ -7,15 +7,17 @@ from vit.models import CustomViTConfig, CustomViTForImageClassification
 
 
 @torch.no_grad()
-def main():
+def evaluate(config, top_k=5):
     device = get_device()
     dataloader = load_imagenet_dataloader(batch_size=4)
 
-    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
-    config.attention_type = "softmax"
     model = CustomViTForImageClassification.from_pretrained(
         "google/vit-base-patch16-224", config=config
     )
+    if config.attention_type == "monarch":
+        model.load_state_dict(
+            torch.load("vit/sparsemax_temperature.pt", weights_only=True), strict=False
+        )
     model = model.to(device)  # type: ignore
 
     total = 0
@@ -27,14 +29,33 @@ def main():
         num_correct = top_k_accuracy_score(
             labels.cpu().numpy(),
             outputs.cpu().numpy(),
-            k=5,
+            k=top_k,
             labels=list(range(1000)),
             normalize=False,
         )
         total = total + labels.size(0)
         total_correct = total_correct + num_correct
 
-    print(f"Top-5 accuracy: {total_correct / total}")
+    print(f"{config.attention_type} Top-{top_k} accuracy: {total_correct / total}")
+
+
+def main():
+
+    # Softmax
+    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
+    assert isinstance(config, CustomViTConfig)
+    config.attention_type = "softmax"
+    evaluate(config)
+
+    # Monarch
+    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
+    assert isinstance(config, CustomViTConfig)
+    config.attention_type = "monarch"
+    config.scale_attention_temperature = True
+    config.efficient_attention_num_steps = 3
+    config.efficient_attention_step_size = 2.5
+    config.efficient_attention_block_size = 14
+    evaluate(config)
 
 
 if __name__ == "__main__":
