@@ -10,6 +10,7 @@ from entmax import sparsemax
 from torch import nn
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from transformers.models.roberta.modeling_roberta import (
+    RobertaAttention,
     RobertaForMaskedLM,
     RobertaForSequenceClassification,
     RobertaModel,
@@ -177,11 +178,42 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         return (context_layer,)
 
 
+class CustomRobertaAttention(RobertaAttention):
+    def __init__(self, config: CustomRobertaConfig, position_embedding_type=None):
+        super().__init__(config, position_embedding_type)
+        self.self = CustomRobertaSelfAttention(
+            config, position_embedding_type=position_embedding_type
+        )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.FloatTensor] = None,
+        head_mask: Optional[torch.FloatTensor] = None,
+        encoder_hidden_states: Optional[torch.FloatTensor] = None,
+        encoder_attention_mask: Optional[torch.FloatTensor] = None,
+        past_key_value: Optional[Tuple[Tuple[torch.FloatTensor]]] = None,
+        output_attentions: Optional[bool] = False,
+    ) -> Tuple[torch.Tensor]:
+        self_outputs = self.self(
+            hidden_states,
+            attention_mask,
+            head_mask,
+            encoder_hidden_states,
+            encoder_attention_mask,
+            past_key_value,
+            output_attentions,
+        )
+        attention_output = self.output(self_outputs[0], hidden_states)
+        outputs = (attention_output, None)
+        return outputs  # type: ignore
+
+
 class CustomRobertaModel(RobertaModel):
     def __init__(self, config: CustomRobertaConfig, add_pooling_layer=True):
         super().__init__(config, add_pooling_layer)
         for layer in self.encoder.layer:
-            layer.attention.self = CustomRobertaSelfAttention(config)
+            layer.attention = CustomRobertaAttention(config)
         self.post_init()
 
 

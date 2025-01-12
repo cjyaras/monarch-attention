@@ -212,10 +212,10 @@ class MonarchMHA(nn.Module):
             (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
         )
         x = pad(inputs, pad_t)
-        X = rearrange(x, "... (k i) d -> ... k i d", i=self.block_size)
-        Y = torch.einsum("...kji,...kid->...kjd", right, X)
-        Z = torch.einsum("...jlk,...kjd->...ljd", left, Y)
-        z = rearrange(Z, "... l j d -> ... (l j) d")
+        X = rearrange(x, "... (k i) h -> ... k i h", i=self.block_size)
+        Y = torch.einsum("...kji,...kih->...kjh", right, X)
+        Z = torch.einsum("...jlk,...kjh->...ljh", left, Y)
+        z = rearrange(Z, "... l j h -> ... (l j) h")
 
         if self.pad_type == "pre":
             return z[..., pad_amount:, :]
@@ -277,13 +277,13 @@ class MonarchMHA(nn.Module):
         right = right_sphere**2
         d_left = torch.einsum(
             "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
-        ) - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
+        ) - torch.einsum("...kji,...ljh,...kih->...jlk", right, query, key)
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
         d_right = torch.einsum(
             "...jk,...kji->...kji", torch.sum(left**2, dim=-2), right
-        ) - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
+        ) - torch.einsum("...jlk,...ljh,...kih->...kji", left, query, key)
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
@@ -301,8 +301,8 @@ class MonarchMHA(nn.Module):
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
-        query = rearrange(query, "... (l j) d -> ... l j d", j=self.block_size)
-        key = rearrange(key, "... (k i) d -> ... k i d", i=self.block_size)
+        query = rearrange(query, "... (l j) h -> ... l j h", j=self.block_size)
+        key = rearrange(key, "... (k i) h -> ... k i h", i=self.block_size)
 
         left_params = _fast_simplex_init(
             (batch_size, num_heads, self.block_size, num_blocks, num_blocks),
@@ -397,12 +397,12 @@ class MonarchBlockDiagonalMHA(nn.Module):
         )
 
         x = pad(inputs, pad_t)
-        X = rearrange(x, "... (k i) d -> ... k i d", i=self.block_size)
+        X = rearrange(x, "... (k i) h -> ... k i h", i=self.block_size)
 
-        Y = torch.einsum("...kji,...kid->...kjd", right, X)
-        Z = torch.einsum("...jlk,...kjd->...ljd", left, Y)
-        Z = Z + torch.einsum("...ljk,...lkd->...ljd", block_diag, X)
-        z = rearrange(Z, "... l j d -> ... (l j) d")
+        Y = torch.einsum("...kji,...kih->...kjh", right, X)
+        Z = torch.einsum("...jlk,...kjh->...ljh", left, Y)
+        Z = Z + torch.einsum("...ljk,...lkh->...ljh", block_diag, X)
+        z = rearrange(Z, "... l j h -> ... (l j) h")
 
         if self.pad_type == "pre":
             return z[..., pad_amount:, :]
@@ -534,7 +534,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
 
         d_left = torch.einsum(
             "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
-        ) - torch.einsum("...kji,...ljd,...kid->...jlk", right, query, key)
+        ) - torch.einsum("...kji,...ljh,...kih->...jlk", right, query, key)
 
         d_left[..., torch.arange(num_blocks), torch.arange(num_blocks)] += torch.einsum(
             "...ijk,...ijk->...ji", right, block_diag
@@ -542,7 +542,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
 
         d_right = (
             torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
-            - torch.einsum("...jlk,...ljd,...kid->...kji", left, query, key)
+            - torch.einsum("...jlk,...ljh,...kih->...kji", left, query, key)
             + torch.einsum("...jii,...ijk->...ijk", left, block_diag)
         )
 
@@ -581,8 +581,8 @@ class MonarchBlockDiagonalMHA(nn.Module):
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
-        query = rearrange(query, "... (l j) d -> ... l j d", j=self.block_size)
-        key = rearrange(key, "... (k i) d -> ... k i d", i=self.block_size)
+        query = rearrange(query, "... (l j) h -> ... l j h", j=self.block_size)
+        key = rearrange(key, "... (k i) h -> ... k i h", i=self.block_size)
 
         block_diag_flat_and_left_flat_params = _fast_simplex_init(
             (batch_size, num_heads, padded_seq_len, self.block_size + num_blocks),

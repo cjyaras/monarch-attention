@@ -6,18 +6,22 @@ from transformers.utils import logging
 
 logging.set_verbosity_error()
 
+use_sparsemax = True
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 with open("/Users/cjyaras/Desktop/soba/examples/roberta/text.txt", "r") as f:
     text = f.read()
 
 tokenizer = RobertaTokenizer.from_pretrained("roberta-base")
-base_config = CustomRobertaConfig.from_pretrained("mtreviso/sparsemax-roberta")
+base_config = CustomRobertaConfig.from_pretrained(
+    "mtreviso/sparsemax-roberta" if use_sparsemax else "roberta-base"
+)
 
 config = CustomRobertaConfig.from_dict(base_config.to_dict())
-config.attention_type = "sparsemax"
+config.attention_type = "sparsemax" if use_sparsemax else "softmax"
 model = CustomRobertaForMaskedLM.from_pretrained(
-    "mtreviso/sparsemax-roberta", config=config
+    "mtreviso/sparsemax-roberta" if use_sparsemax else "roberta-base", config=config
 )
 model = model.to(device)  # type: ignore
 
@@ -32,7 +36,6 @@ with FlopTensorDispatchMode(model) as ftdm:
         print("Sparsemax:")
         [print(k) for k in results]  # type: ignore
 
-    print(ftdm.flop_counts["roberta.encoder.layer.0.attention"])
     sparsemax_flops = ftdm.flop_counts["roberta.encoder.layer.0.attention"][
         "bmm.default"
     ]

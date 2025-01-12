@@ -68,20 +68,14 @@ class CustomViTSelfAttention(ViTSelfAttention):
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                # self.efficient_attn = torch.compile(
-                #     MonarchMHA(
-                #         block_size=block_size,
-                #         num_steps=num_steps,
-                #         step_size=step_size,
-                #         pad_type=pad_type,  # type: ignore
-                #     ),
-                #     # mode="max-autotune",
-                # )
-                self.efficient_attn = MonarchMHA(
-                    block_size=block_size,
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    pad_type=pad_type,  # type: ignore
+                self.efficient_attn = torch.compile(
+                    MonarchMHA(
+                        block_size=block_size,
+                        num_steps=num_steps,
+                        step_size=step_size,
+                        pad_type=pad_type,  # type: ignore
+                    ),
+                    mode="max-autotune",
                 )
             else:
                 block_size = config.efficient_attention_block_size
