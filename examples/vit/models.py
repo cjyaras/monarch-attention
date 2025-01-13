@@ -22,6 +22,7 @@ class AttentionType(StrEnum):
     low_rank = "low-rank"
     monarch = "monarch"
     monarch_block_diagonal = "monarch-block-diagonal"
+    linformer = "linformer"
 
 
 class CustomViTConfig(ViTConfig):
@@ -45,6 +46,8 @@ class CustomViTConfig(ViTConfig):
         self.efficient_attention_rank = efficient_attention_rank
         self.efficient_attention_block_size = efficient_attention_block_size
         self.efficient_attention_pad_type = efficient_attention_pad_type
+
+        # TODO: Add baselines config here
 
 
 def get_config() -> CustomViTConfig:
@@ -103,13 +106,15 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     ),
                     model="reduce-overhead",
                 )
+
+            # TODO: Add baselines set-up logic here
             else:
                 raise ValueError(f"Invalid attention type: {self.attention_type}")
 
         if config.scale_attention_temperature:
             self.register_buffer(
                 "attention_temperature",
-                torch.full((self.num_attention_heads,), 10.0),
+                torch.full((self.num_attention_heads,), 1.0),
                 persistent=True,
             )
         else:
@@ -156,6 +161,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
             )
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
+        # TODO: Add baselines forward logic here
         else:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 

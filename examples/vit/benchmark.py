@@ -88,7 +88,7 @@ def main():
     config.attention_type = AttentionType.softmax
     config._attn_implementation = "eager"
     evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
-    # evaluate_runtime_and_flops(config)
+    evaluate_runtime_and_flops(config)
 
     # Sparsemax
     config = get_config()
@@ -104,7 +104,9 @@ def main():
     config.efficient_attention_step_size = 2.5
     config.efficient_attention_block_size = 14
     evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
-    # evaluate_runtime_and_flops(config)
+    evaluate_runtime_and_flops(config)
+
+    # TODO: Add baselines here
 
 
 if __name__ == "__main__":
