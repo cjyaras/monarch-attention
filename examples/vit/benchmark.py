@@ -86,7 +86,7 @@ def main():
     # Softmax
     config = get_config()
     config.attention_type = AttentionType.softmax
-    config._attn_implementation = "eager"
+    config.enable_flash_attention = False
     evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
     evaluate_runtime_and_flops(config)
 

@@ -36,6 +36,7 @@ class CustomRobertaConfig(RobertaConfig):
     def __init__(
         self,
         attention_type: AttentionType = AttentionType.softmax,
+        enable_flash_attention: bool = False,
         scale_attention_temperature: bool = False,
         efficient_attention_num_steps: Optional[int] = None,
         efficient_attention_step_size: Optional[float] = None,
@@ -45,8 +46,10 @@ class CustomRobertaConfig(RobertaConfig):
         **kwargs,
     ):
         super().__init__(**kwargs)
-        self._attn_implementation = "sdpa"
+        # Set _attn_implementation to empty string to override attention_mask logic in RobertaModel
+        self._attn_implementation = ""
         self.attention_type = attention_type
+        self.enable_flash_attention = enable_flash_attention
         self.scale_attention_temperature = scale_attention_temperature
         self.efficient_attention_num_steps = efficient_attention_num_steps
         self.efficient_attention_step_size = efficient_attention_step_size
@@ -119,7 +122,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         else:
             self.attention_temperature = None
 
-        self.enable_flash_attention = config._attn_implementation == "sdpa"
+        self.enable_flash_attention = config.enable_flash_attention
 
     # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
     def load_state_dict(self, state_dict, **kwargs):
