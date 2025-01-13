@@ -109,7 +109,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
         if config.scale_attention_temperature:
             self.register_buffer(
                 "attention_temperature",
-                torch.full((self.num_attention_heads,), 1.0),
+                torch.full((self.num_attention_heads,), 10.0),
                 persistent=True,
             )
         else:
@@ -191,10 +191,13 @@ class CustomViTForImageClassification(ViTForImageClassification):
 def get_model(
     config: CustomViTConfig, device: DeviceLikeType
 ) -> CustomViTForImageClassification:
-    model = CustomViTForImageClassification(config)
+    model = CustomViTForImageClassification.from_pretrained(
+        "google/vit-base-patch16-224", config=config
+    )
     if config.scale_attention_temperature:
         model.load_state_dict(
             torch.load("vit/sparsemax_temperature.pt", weights_only=True), strict=False
         )
     model = model.to(device)  # type: ignore
+    model.eval()
     return model

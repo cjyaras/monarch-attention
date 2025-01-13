@@ -1,4 +1,5 @@
 from time import time
+from typing import Optional
 
 import torch
 from common.utils import get_device, move
@@ -17,6 +18,7 @@ def evaluate_accuracy(
     config: CustomViTConfig,
     batch_size: int = 1,
     top_k: int = 5,
+    num_samples: Optional[int] = None,
 ):
     device = get_device()
     dataloader = imagenet_dataloader(batch_size=batch_size)
@@ -37,6 +39,9 @@ def evaluate_accuracy(
         )
         total = total + labels.size(0)
         total_correct = total_correct + num_correct
+
+        if num_samples is not None and total >= num_samples:
+            break
 
     print(f"{config.attention_type} top-{top_k} accuracy: {total_correct / total:0.3f}")
 
@@ -75,18 +80,21 @@ def evaluate_runtime_and_flops(config: CustomViTConfig):
 
 def main():
 
+    num_samples = 100
+    batch_size = 4
+
     # Softmax
     config = get_config()
     config.attention_type = AttentionType.softmax
     config._attn_implementation = "eager"
-    evaluate_accuracy(config, batch_size=4)
-    evaluate_runtime_and_flops(config)
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    # evaluate_runtime_and_flops(config)
 
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
     config.scale_attention_temperature = True
-    evaluate_accuracy(config, batch_size=4)
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
 
     # Monarch
     config = get_config()
@@ -95,8 +103,8 @@ def main():
     config.efficient_attention_num_steps = 3
     config.efficient_attention_step_size = 2.5
     config.efficient_attention_block_size = 14
-    evaluate_accuracy(config, batch_size=4)
-    evaluate_runtime_and_flops(config)
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    # evaluate_runtime_and_flops(config)
 
 
 if __name__ == "__main__":
