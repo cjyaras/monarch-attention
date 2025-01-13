@@ -1,5 +1,6 @@
+from enum import StrEnum
 from math import ceil, prod, sqrt
-from typing import Literal, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -145,7 +146,9 @@ class LowRankMHA(nn.Module):
         return left, right
 
 
-PadType = Literal["pre", "post"]
+class PadType(StrEnum):
+    pre = "pre"
+    post = "post"
 
 
 class MonarchMHA(nn.Module):
@@ -209,7 +212,7 @@ class MonarchMHA(nn.Module):
         seq_len = inputs.shape[-2]
         pad_amount = self._get_pad_amount(seq_len)
         pad_t = (0, 0) + (
-            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+            (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         x = pad(inputs, pad_t)
         X = rearrange(x, "... (k i) h -> ... k i h", i=self.block_size)
@@ -217,7 +220,7 @@ class MonarchMHA(nn.Module):
         Z = torch.einsum("...jlk,...kjh->...ljh", left, Y)
         z = rearrange(Z, "... l j h -> ... (l j) h")
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             return z[..., pad_amount:, :]
         else:
             return z[..., : -pad_amount or None, :]
@@ -228,7 +231,7 @@ class MonarchMHA(nn.Module):
         out = torch.einsum("...jlk,...kji->...ljki", left, right)
         out = rearrange(out, "... l j k i -> ... (l j) (k i)")
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             return out[..., pad_amount:, pad_amount:]
         else:
             return out[..., : -pad_amount or None, : -pad_amount or None]
@@ -243,7 +246,7 @@ class MonarchMHA(nn.Module):
     ) -> Tensor:
         right_params_flat = rearrange(right_params, "... k j i -> ... j (k i)")
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             right_params_flat[..., :pad_amount] = 0.0
 
             if valid_mask is not None:
@@ -297,7 +300,7 @@ class MonarchMHA(nn.Module):
         num_blocks = self._get_num_blocks(seq_len)
 
         pad_t = (0, 0) + (
-            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+            (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
@@ -393,7 +396,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
         seq_len = inputs.shape[-2]
         pad_amount = self._get_pad_amount(seq_len)
         pad_t = (0, 0) + (
-            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+            (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
 
         x = pad(inputs, pad_t)
@@ -404,7 +407,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
         Z = Z + torch.einsum("...ljk,...lkh->...ljh", block_diag, X)
         z = rearrange(Z, "... l j h -> ... (l j) h")
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             return z[..., pad_amount:, :]
         else:
             return z[..., : -pad_amount or None, :]
@@ -427,7 +430,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
             "... l j k i -> ... (l j) (k i)",
         )
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             return out[..., pad_amount:, pad_amount:]
         else:
             return out[..., : -pad_amount or None, : -pad_amount or None]
@@ -457,7 +460,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
             right_params, "... k j i -> ... j (k i)"
         )
 
-        if self.pad_type == "pre":
+        if self.pad_type == PadType.pre:
             block_diag_flat_params_transposed[..., :pad_amount] = 0.0
             right_flat_params_transposed[..., :pad_amount] = 0.0
 
@@ -577,7 +580,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
         padded_seq_len = seq_len + pad_amount
 
         pad_t = (0, 0) + (
-            (pad_amount, 0) if self.pad_type == "pre" else (0, pad_amount)
+            (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
@@ -621,33 +624,3 @@ class MonarchBlockDiagonalMHA(nn.Module):
         left = rearrange(left_flat, "... (l j) k -> ... j l k", j=self.block_size)
         right = _safe_normalize(right_params, dim=-1) ** 2
         return block_diag, left, right
-
-
-def main():
-
-    import matplotlib.pyplot as plt
-    from entmax import sparsemax
-
-    mha = MonarchMHA(2, 100, 1e1, "pre")
-    query = torch.randn(1, 1, 16, 4)
-    key = torch.randn(1, 1, 16, 4)
-
-    attention_mask = torch.tensor([13 * [1] + 3 * [0]])
-
-    original_matrix = sparsemax(
-        query @ key.transpose(-1, -2) / sqrt(query.shape[-1])
-        + (1 - attention_mask[:, None, None, :]) * -1e9
-    )[  # type: ignore
-        0, 0
-    ]
-    efficient_matrix = mha.get_matrix(query, key, attention_mask)[0, 0]
-    print(efficient_matrix)
-
-    fig, axes = plt.subplots(1, 2)
-    axes[0].imshow(original_matrix)
-    axes[1].imshow(efficient_matrix)
-    plt.show()
-
-
-if __name__ == "__main__":
-    main()

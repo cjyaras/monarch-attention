@@ -4,7 +4,7 @@ from torch.utils.data import DataLoader
 from transformers import ViTImageProcessor
 
 
-def load_imagenet_dataloader(batch_size: int):
+def imagenet_dataloader(batch_size: int = 1):
     dataset = load_dataset("imagenet-1k", split="validation", streaming=True)
     image_processor = ViTImageProcessor.from_pretrained(
         "google/vit-base-patch16-224", use_fast=True

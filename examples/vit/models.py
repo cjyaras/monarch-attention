@@ -1,9 +1,11 @@
+from enum import StrEnum
 from math import sqrt
-from typing import Literal, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
 from entmax import sparsemax
+from torch._prims_common import DeviceLikeType
 from transformers.models.vit.configuration_vit import ViTConfig
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
@@ -11,23 +13,27 @@ from transformers.models.vit.modeling_vit import (
     ViTSelfAttention,
 )
 
-AttentionType = Literal[
-    "softmax", "sparsemax", "low-rank", "monarch", "monarch-block-diagonal"
-]
-
 from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA, PadType
+
+
+class AttentionType(StrEnum):
+    softmax = "softmax"
+    sparsemax = "sparsemax"
+    low_rank = "low-rank"
+    monarch = "monarch"
+    monarch_block_diagonal = "monarch-block-diagonal"
 
 
 class CustomViTConfig(ViTConfig):
     def __init__(
         self,
-        attention_type: AttentionType = "sparsemax",
+        attention_type: AttentionType = AttentionType.softmax,
         scale_attention_temperature: bool = False,
         efficient_attention_num_steps: Optional[int] = None,
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
-        efficient_attention_pad_type: PadType = "pre",
+        efficient_attention_pad_type: PadType = PadType.pre,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -41,18 +47,28 @@ class CustomViTConfig(ViTConfig):
         self.efficient_attention_pad_type = efficient_attention_pad_type
 
 
+def get_config() -> CustomViTConfig:
+    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
+    assert isinstance(config, CustomViTConfig)
+    return config
+
+
 class CustomViTSelfAttention(ViTSelfAttention):
 
     def __init__(self, config: CustomViTConfig):
         super().__init__(config)
         self.attention_type = config.attention_type
 
-        if self.attention_type in ["low-rank", "monarch", "monarch-block-diagonal"]:
+        if self.attention_type in [
+            AttentionType.low_rank,
+            AttentionType.monarch,
+            AttentionType.monarch_block_diagonal,
+        ]:
             num_steps = config.efficient_attention_num_steps
             step_size = config.efficient_attention_step_size
             assert num_steps is not None and step_size is not None
 
-            if self.attention_type == "low-rank":
+            if self.attention_type == AttentionType.low_rank:
                 rank = config.efficient_attention_rank
                 assert rank is not None
                 self.efficient_attn = torch.compile(
@@ -61,10 +77,10 @@ class CustomViTSelfAttention(ViTSelfAttention):
                         step_size=step_size,
                         rank=rank,
                     ),
-                    mode="max-autotune",
+                    mode="reduce-overhead",
                 )
 
-            elif self.attention_type == "monarch":
+            elif self.attention_type == AttentionType.monarch:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
@@ -75,15 +91,20 @@ class CustomViTSelfAttention(ViTSelfAttention):
                         step_size=step_size,
                         pad_type=pad_type,  # type: ignore
                     ),
-                    mode="max-autotune",
+                    mode="reduce-overhead",
                 )
-            else:
+            elif self.attention_type == AttentionType.monarch_block_diagonal:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = MonarchBlockDiagonalMHA(
-                    block_size, num_steps, step_size, pad_type  # type: ignore
+                self.efficient_attn = torch.compile(
+                    MonarchBlockDiagonalMHA(
+                        block_size, num_steps, step_size, pad_type  # type: ignore
+                    ),
+                    model="reduce-overhead",
                 )
+            else:
+                raise ValueError(f"Invalid attention type: {self.attention_type}")
 
         if config.scale_attention_temperature:
             self.register_buffer(
@@ -115,7 +136,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
         if self.attention_temperature is not None:
             query_layer = query_layer / self.attention_temperature[..., None, None]
 
-        if self.attention_type == "softmax" and self.enable_flash_attention:
+        if self.attention_type == AttentionType.softmax and self.enable_flash_attention:
             context_layer = torch.nn.functional.scaled_dot_product_attention(
                 query_layer,
                 key_layer,
@@ -125,12 +146,12 @@ class CustomViTSelfAttention(ViTSelfAttention):
                 is_causal=False,
                 scale=None,
             )
-        elif self.attention_type in ["softmax", "sparsemax"]:
+        elif self.attention_type in [AttentionType.softmax, AttentionType.sparsemax]:
             attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
             attention_scores = attention_scores / sqrt(self.attention_head_size)
             attention_probs = (
                 sparsemax(attention_scores, dim=-1)
-                if self.attention_type == "sparsemax"
+                if self.attention_type == AttentionType.sparsemax
                 else nn.functional.softmax(attention_scores, dim=-1)
             )
             assert isinstance(attention_probs, torch.Tensor)
@@ -165,3 +186,15 @@ class CustomViTForImageClassification(ViTForImageClassification):
         super().__init__(config)
         self.vit = CustomViTModel(config, add_pooling_layer=False)
         self.post_init()
+
+
+def get_model(
+    config: CustomViTConfig, device: DeviceLikeType
+) -> CustomViTForImageClassification:
+    model = CustomViTForImageClassification(config)
+    if config.scale_attention_temperature:
+        model.load_state_dict(
+            torch.load("vit/sparsemax_temperature.pt", weights_only=True), strict=False
+        )
+    model = model.to(device)  # type: ignore
+    return model

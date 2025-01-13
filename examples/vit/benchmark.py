@@ -1,24 +1,26 @@
+from time import time
+
 import torch
 from common.utils import get_device, move
 from sklearn.metrics import top_k_accuracy_score
+from torchtnt.utils.flops import FlopTensorDispatchMode
 from tqdm import tqdm
-from vit.data import load_imagenet_dataloader
-from vit.models import CustomViTConfig, CustomViTForImageClassification
+from transformers.utils import logging
+from vit.data import imagenet_dataloader
+from vit.models import AttentionType, CustomViTConfig, get_config, get_model
+
+logging.set_verbosity_error()
 
 
 @torch.no_grad()
-def evaluate(config, top_k=5):
+def evaluate_accuracy(
+    config: CustomViTConfig,
+    batch_size: int = 1,
+    top_k: int = 5,
+):
     device = get_device()
-    dataloader = load_imagenet_dataloader(batch_size=4)
-
-    model = CustomViTForImageClassification.from_pretrained(
-        "google/vit-base-patch16-224", config=config
-    )
-    if config.attention_type == "monarch":
-        model.load_state_dict(
-            torch.load("vit/sparsemax_temperature.pt", weights_only=True), strict=False
-        )
-    model = model.to(device)  # type: ignore
+    dataloader = imagenet_dataloader(batch_size=batch_size)
+    model = get_model(config, device)
 
     total = 0
     total_correct = 0
@@ -36,26 +38,65 @@ def evaluate(config, top_k=5):
         total = total + labels.size(0)
         total_correct = total_correct + num_correct
 
-    print(f"{config.attention_type} Top-{top_k} accuracy: {total_correct / total}")
+    print(f"{config.attention_type} top-{top_k} accuracy: {total_correct / total:0.3f}")
+
+
+@torch.no_grad()
+def evaluate_runtime_and_flops(config: CustomViTConfig):
+    device = get_device()
+    inputs = move(next(iter(imagenet_dataloader())), device)["image"]
+    model = get_model(config, device)
+
+    # Warm up
+    model(**inputs)
+
+    # Timing
+    if torch.cuda.is_available():
+        start_event = torch.cuda.Event(enable_timing=True)
+        end_event = torch.cuda.Event(enable_timing=True)
+        start_event.record()  # type: ignore
+        model(**inputs)
+        end_event.record()  # type: ignore
+        torch.cuda.synchronize()
+        total_ms = start_event.elapsed_time(end_event)
+    else:
+        start = time()
+        model(**inputs)
+        total_ms = (time() - start) * 1000
+
+    # Flops
+    with FlopTensorDispatchMode(model) as ftdm:
+        model(**inputs)
+        flops_counts = ftdm.flop_counts["vit.encoder.layer.0.attention"]["bmm.default"]
+
+    print(f"{config.attention_type} attention time: {total_ms:.2f}ms")
+    print(f"{config.attention_type} attention flops: {flops_counts:0.2e}")
 
 
 def main():
 
     # Softmax
-    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
-    assert isinstance(config, CustomViTConfig)
-    config.attention_type = "softmax"
-    evaluate(config)
+    config = get_config()
+    config.attention_type = AttentionType.softmax
+    config._attn_implementation = "eager"
+    evaluate_accuracy(config, batch_size=4)
+    evaluate_runtime_and_flops(config)
+
+    # Sparsemax
+    config = get_config()
+    config.attention_type = AttentionType.sparsemax
+    config.scale_attention_temperature = True
+    evaluate_accuracy(config, batch_size=4)
 
     # Monarch
-    config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
-    assert isinstance(config, CustomViTConfig)
-    config.attention_type = "monarch"
+    config = get_config()
+    config.attention_type = AttentionType.monarch
     config.scale_attention_temperature = True
     config.efficient_attention_num_steps = 3
     config.efficient_attention_step_size = 2.5
     config.efficient_attention_block_size = 14
-    evaluate(config)
+    evaluate_accuracy(config, batch_size=4)
+    evaluate_runtime_and_flops(config)
 
 
 if __name__ == "__main__":

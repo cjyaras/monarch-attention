@@ -1,86 +1,33 @@
-from typing import Dict, List
-
 import torch
-from datasets import load_dataset
-from datasets.iterable_dataset import IterableDataset
-from transformers import AutoImageProcessor
-from vit.models import CustomViTConfig, CustomViTForImageClassification
-
-from sobalib.utils import calibrate_sparsemax_temperature
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-ds = load_dataset("imagenet-1k", split="validation", streaming=True)
-assert isinstance(ds, IterableDataset)
-ds_examples = ds.take(50)
-images = [item["image"] for item in ds_examples]
-image_processor = AutoImageProcessor.from_pretrained(
-    "google/vit-base-patch16-224", use_fast=True
-)
-
-config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
-model = CustomViTForImageClassification.from_pretrained(
-    "google/vit-base-patch16-224", config=config
-)
-model = model.to(device)  # type: ignore
+from common.utils import get_device, move
+from vit.data import imagenet_dataloader
+from vit.models import get_config, get_model
+from vit.utils import calibrate_sparsemax_temperature, extract_qk
 
 
-def register_qk_hook(
-    model: CustomViTForImageClassification,
-    all_layer_intermediates: List[Dict[str, torch.Tensor]],
-):
-    layers = model.vit.encoder.layer
+@torch.no_grad()
+def main():
+    device = get_device()
+    inputs = move(next(iter(imagenet_dataloader())), device)
+    config = get_config()
+    model = get_model(config, device)
 
-    for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.attention
-
-        def query_hook(_layer_idx):
-            def hook(module, input, output):
-                all_layer_intermediates[_layer_idx].update(
-                    {"query": attn_layer.transpose_for_scores(output)}
-                )
-
-            return hook
-
-        def key_hook(_layer_idx):
-            def hook(module, input, output):
-                all_layer_intermediates[_layer_idx].update(
-                    {"key": attn_layer.transpose_for_scores(output)}
-                )
-
-            return hook
-
-        attn_layer.query.register_forward_hook(query_hook(layer_idx))
-        attn_layer.key.register_forward_hook(key_hook(layer_idx))
+    query, key = extract_qk(model, inputs)
+    optimal_temperature = calibrate_sparsemax_temperature(
+        list(torch.unbind(query)),
+        list(torch.unbind(key)),
+        torch.linspace(1, 50, 50).to(device),
+    )
+    torch.save(
+        {
+            f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
+                i
+            ]
+            for i in range(len(optimal_temperature))
+        },
+        "vit/sparsemax_temperature.pt",
+    )
 
 
-all_layer_intermediates = [{} for _ in range(config.num_hidden_layers)]
-register_qk_hook(model, all_layer_intermediates)
-
-inputs = image_processor(images=images, return_tensors="pt").to(device)
-
-with torch.no_grad():
-    model(**inputs)
-
-query = torch.stack(
-    [layer_intermediates["query"] for layer_intermediates in all_layer_intermediates],
-    dim=0,
-).transpose(1, 0)
-key = torch.stack(
-    [layer_intermediates["key"] for layer_intermediates in all_layer_intermediates],
-    dim=0,
-).transpose(1, 0)
-optimal_temperature = calibrate_sparsemax_temperature(
-    list(torch.unbind(query)),
-    list(torch.unbind(key)),
-    torch.linspace(1, 50, 50).to(device),
-)
-torch.save(
-    {
-        f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
-            i
-        ]
-        for i in range(len(optimal_temperature))
-    },
-    "vit/sparsemax_temperature.pt",
-)
+if __name__ == "__main__":
+    main()
