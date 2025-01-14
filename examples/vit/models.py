@@ -97,6 +97,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     ),
                     mode="reduce-overhead",
                 )
+
             elif self.attention_type == AttentionType.monarch_block_diagonal:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
@@ -152,6 +153,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
                 is_causal=False,
                 scale=None,
             )
+
         elif self.attention_type in [AttentionType.softmax, AttentionType.sparsemax]:
             attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
             attention_scores = attention_scores / sqrt(self.attention_head_size)
@@ -162,6 +164,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
             )
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
+
         # TODO: Add baselines forward logic here
         else:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)

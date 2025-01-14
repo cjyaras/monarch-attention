@@ -15,7 +15,6 @@ from sobalib.layers import MonarchMHA, PadType
 def main():
     device = get_device()
     inputs = move(next(iter(imagenet_dataloader())), device)
-
     config = get_config()
     model = get_model(config, device)
 

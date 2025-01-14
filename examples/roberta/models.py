@@ -7,6 +7,7 @@ from typing import Optional, Tuple
 import torch
 from entmax import sparsemax
 from torch import nn
+from torch._prims_common import DeviceLikeType
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 from transformers.models.roberta.modeling_roberta import (
@@ -56,6 +57,12 @@ class CustomRobertaConfig(RobertaConfig):
         self.efficient_attention_pad_type = efficient_attention_pad_type
 
 
+def get_config() -> CustomRobertaConfig:
+    config = CustomRobertaConfig.from_pretrained("roberta-base")
+    assert isinstance(config, CustomRobertaConfig)
+    return config
+
+
 class CustomRobertaSelfAttention(RobertaSelfAttention):
     def __init__(self, config: CustomRobertaConfig, position_embedding_type=None):
         super().__init__(config, position_embedding_type=position_embedding_type)
@@ -98,6 +105,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                     ),
                     mode="reduce-overhead",
                 )
+
             elif self.attention_type == AttentionType.monarch_block_diagonal:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
@@ -108,6 +116,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                     ),
                     mode="reduce-overhead",
                 )
+
             else:
                 raise ValueError(f"Invalid attention type: {self.attention_type}")
 
@@ -168,6 +177,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                 is_causal=False,
                 scale=None,
             )
+
         elif self.attention_type in [AttentionType.softmax, AttentionType.sparsemax]:
             attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
             attention_scores = attention_scores / sqrt(self.attention_head_size)
@@ -180,6 +190,7 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             )
             assert isinstance(attention_probs, Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
+
         else:
             context_layer = self.efficient_attn(
                 query_layer, key_layer, value_layer, attention_mask
@@ -275,3 +286,19 @@ class CustomRobertaForSequenceClassification(RobertaForSequenceClassification):
         super().__init__(config)
         self.roberta = CustomRobertaModel(config)
         self.post_init()
+
+
+def get_model(
+    config: CustomRobertaConfig, device: DeviceLikeType
+) -> CustomRobertaForSequenceClassification:
+    model = CustomRobertaForSequenceClassification.from_pretrained(
+        (
+            "roberta-base"
+            if config.attention_type == AttentionType.softmax
+            else "mtreviso/sparsemax-roberta"
+        ),
+        config=config,
+    )
+    model = model.to(device)  # type: ignore
+    model.eval()
+    return model

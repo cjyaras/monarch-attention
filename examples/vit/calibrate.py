@@ -16,7 +16,7 @@ def main():
     optimal_temperature = calibrate_sparsemax_temperature(
         list(torch.unbind(query)),
         list(torch.unbind(key)),
-        torch.linspace(1, 50, 50).to(device),
+        torch.arange(1, 51, dtype=torch.float).to(device),
     )
     torch.save(
         {

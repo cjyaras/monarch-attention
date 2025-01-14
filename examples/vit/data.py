@@ -1,32 +1,30 @@
 import torch
 from datasets import load_dataset
-from torch.utils.data import DataLoader
-from transformers import ViTImageProcessor
+from torch.utils.data import DataLoader, Dataset
+from transformers import ViTImageProcessorFast
 
 
-def imagenet_dataloader(batch_size: int = 1):
-    dataset = load_dataset("imagenet-1k", split="validation", streaming=True)
-    image_processor = ViTImageProcessor.from_pretrained(
-        "google/vit-base-patch16-224", use_fast=True
+def imagenet_dataloader(batch_size: int = 1, streaming: bool = True) -> DataLoader:
+    dataset = load_dataset("imagenet-1k", split="validation", streaming=streaming)
+    image_processor = ViTImageProcessorFast.from_pretrained(
+        "google/vit-base-patch16-224"
     )
+
+    def preprocess_fn(example):
+        image = example["image"].convert("RGB")
+        result = image_processor(image, return_tensors="pt")
+        result["labels"] = example["label"]
+        return result
+
     dataset = dataset.map(
-        lambda example: {
-            "image": image_processor(
-                example["image"].convert("RGB"), return_tensors="pt"
-            ),
-            "label": example["label"],
-        }
+        preprocess_fn, batched=not streaming, remove_columns=dataset.column_names  # type: ignore
     )
 
     def collate_fn(examples):
-        return {
-            "image": {
-                "pixel_values": torch.concatenate(
-                    [example["image"]["pixel_values"] for example in examples]
-                )
-            },
-            "label": torch.tensor([example["label"] for example in examples]),
-        }
+        pixel_values = torch.cat([example["pixel_values"] for example in examples])
+        labels = torch.tensor([example["labels"] for example in examples])
+        return {"pixel_values": pixel_values, "labels": labels}
 
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)  # type: ignore
+    assert isinstance(dataset, Dataset)
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
     return dataloader
