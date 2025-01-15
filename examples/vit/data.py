@@ -25,7 +25,7 @@ def imagenet_dataloader(
         dataset = dataset.take(num_samples)
 
     dataset = dataset.map(
-        preprocess_fn, batched=not streaming, remove_columns=dataset.column_names  # type: ignore
+        preprocess_fn, batched=False, remove_columns=dataset.column_names  # type: ignore
     )
 
     def collate_fn(examples):

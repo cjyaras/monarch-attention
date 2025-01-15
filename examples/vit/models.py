@@ -105,12 +105,12 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     pad_type=pad_type,
                 )
 
+            else:
+                raise ValueError(f"Invalid attention type: {self.attention_type}")
+
             maybe_compile(self.efficient_attn)
 
-        # TODO: Add baselines set-up logic here
-
-        else:
-            raise ValueError(f"Invalid attention type: {self.attention_type}")
+            # TODO: Add baselines set-up logic here
 
         if config.scale_attention_temperature:
             self.register_buffer(
