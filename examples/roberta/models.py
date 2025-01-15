@@ -6,6 +6,8 @@ from typing import Optional, Tuple
 
 import torch
 from entmax import sparsemax
+from huggingface_hub import snapshot_download
+from roberta.data import GlueTaskName
 from torch import nn
 from torch._prims_common import DeviceLikeType
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
@@ -34,22 +36,20 @@ class AttentionType(StrEnum):
 class CustomRobertaConfig(RobertaConfig):
     def __init__(
         self,
-        attention_type: AttentionType = AttentionType.softmax,
+        attention_type: AttentionType = AttentionType.sparsemax,
         enable_flash_attention: bool = False,
-        scale_attention_temperature: bool = False,
         efficient_attention_num_steps: Optional[int] = None,
         efficient_attention_step_size: Optional[float] = None,
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
-        efficient_attention_pad_type: PadType = PadType.pre,
+        efficient_attention_pad_type: PadType = PadType.post,
         **kwargs,
     ):
         super().__init__(**kwargs)
-        # Set _attn_implementation to empty string to override attention_mask logic in RobertaModel
-        self._attn_implementation = ""
+        # Set _attn_implementation to eager to override attention_mask logic in RobertaModel
+        self._attn_implementation = "eager"
         self.attention_type = attention_type
         self.enable_flash_attention = enable_flash_attention
-        self.scale_attention_temperature = scale_attention_temperature
         self.efficient_attention_num_steps = efficient_attention_num_steps
         self.efficient_attention_step_size = efficient_attention_step_size
         self.efficient_attention_rank = efficient_attention_rank
@@ -83,27 +83,38 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             if self.attention_type == AttentionType.low_rank:
                 rank = config.efficient_attention_rank
                 assert rank is not None
-                self.efficient_attn = torch.compile(
-                    LowRankMHA(
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        rank=rank,
-                    ),
-                    mode="reduce-overhead",
+                self.efficient_attn = LowRankMHA(
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    rank=rank,
                 )
+                # self.efficient_attn = torch.compile(
+                #     LowRankMHA(
+                #         num_steps=num_steps,
+                #         step_size=step_size,
+                #         rank=rank,
+                #     ),
+                #     mode="reduce-overhead",
+                # )
 
             elif self.attention_type == AttentionType.monarch:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchMHA(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    ),
-                    mode="reduce-overhead",
+                # self.efficient_attn = torch.compile(
+                #     MonarchMHA(
+                #         block_size=block_size,
+                #         num_steps=num_steps,
+                #         step_size=step_size,
+                #         pad_type=pad_type,  # type: ignore
+                #     ),
+                #     mode="reduce-overhead",
+                # )
+                self.efficient_attn = MonarchMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,  # type: ignore
                 )
 
             elif self.attention_type == AttentionType.monarch_block_diagonal:
@@ -119,15 +130,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
 
             else:
                 raise ValueError(f"Invalid attention type: {self.attention_type}")
-
-        if config.scale_attention_temperature:
-            self.register_buffer(
-                "attention_temperature",
-                torch.full((self.num_attention_heads,), 1.0),
-                persistent=True,
-            )
-        else:
-            self.attention_temperature = None
 
         self.enable_flash_attention = config.enable_flash_attention
 
@@ -163,9 +165,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         key_layer = self.transpose_for_scores(self.key(hidden_states))
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        if self.attention_temperature is not None:
-            query_layer = query_layer / self.attention_temperature[..., None, None]
 
         if self.attention_type == AttentionType.softmax and self.enable_flash_attention:
             context_layer = torch.nn.functional.scaled_dot_product_attention(
@@ -289,14 +288,16 @@ class CustomRobertaForSequenceClassification(RobertaForSequenceClassification):
 
 
 def get_model(
-    config: CustomRobertaConfig, device: DeviceLikeType
+    task_name: GlueTaskName, config: CustomRobertaConfig, device: DeviceLikeType
 ) -> CustomRobertaForSequenceClassification:
+    folder_name = f"checkpoint-80000-{task_name}"
+    model_folder = snapshot_download(
+        repo_id="mtreviso/sparsemax-roberta",
+        repo_type="model",
+        allow_patterns=f"{folder_name}/*",
+    )
     model = CustomRobertaForSequenceClassification.from_pretrained(
-        (
-            "roberta-base"
-            if config.attention_type == AttentionType.softmax
-            else "mtreviso/sparsemax-roberta"
-        ),
+        "/".join((model_folder, folder_name)),
         config=config,
     )
     model = model.to(device)  # type: ignore

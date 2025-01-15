@@ -123,12 +123,12 @@ class LowRankMHA(nn.Module):
 
         left_params = _fast_simplex_init(
             (batch_size, num_heads, seq_len, self.rank),
-            perturb_scale=1e-3,
+            perturb_scale=1e-1,
             device=query.device,
         )
         right_params = _fast_simplex_init(
             (batch_size, num_heads, self.rank, seq_len),
-            perturb_scale=1e-3,
+            perturb_scale=1e-1,
             device=query.device,
         )
 

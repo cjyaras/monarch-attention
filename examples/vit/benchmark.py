@@ -1,9 +1,7 @@
-from time import time
 from typing import Optional
 
 import torch
 from common.utils import benchmark_flops, benchmark_time, get_device, move
-from torchtnt.utils.flops import FlopTensorDispatchMode
 from tqdm import tqdm
 from transformers.utils import logging
 from vit.data import imagenet_dataloader
@@ -22,20 +20,15 @@ def evaluate_accuracy(
 ):
 
     device = get_device()
-    dataloader = imagenet_dataloader(batch_size=batch_size)
+    dataloader = imagenet_dataloader(batch_size=batch_size, num_samples=num_samples)
     model = get_model(config, device)
     metric = TopKAccuracyMetric()
-
-    total = 0
 
     for batch in tqdm(dataloader):
         inputs = move(batch, device)
         labels = inputs.pop("labels")
         outputs = model(**inputs).logits
         metric.add_batch(logits=outputs, labels=labels)
-        total = total + labels.size(0)
-        if num_samples is not None and total >= num_samples:
-            break
 
     accuracy = metric.compute()["accuracy"]
     print(f"{config.attention_type} top-{top_k} accuracy: {accuracy:0.3f}")
@@ -45,7 +38,7 @@ def evaluate_accuracy(
 def evaluate_runtime_and_flops(config: CustomViTConfig):
 
     device = get_device()
-    example = next(iter(imagenet_dataloader()))
+    example = next(iter(imagenet_dataloader(batch_size=1, num_samples=1)))
     inputs = move(example, device)
     model = get_model(config, device)
 
@@ -72,23 +65,23 @@ def main():
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
     evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
-    # evaluate_runtime_and_flops(config)
+    evaluate_runtime_and_flops(config)
 
-    # # Sparsemax
-    # config = get_config()
-    # config.attention_type = AttentionType.sparsemax
-    # config.scale_attention_temperature = True
-    # evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    # Sparsemax
+    config = get_config()
+    config.attention_type = AttentionType.sparsemax
+    config.scale_attention_temperature = True
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
 
-    # # Monarch
-    # config = get_config()
-    # config.attention_type = AttentionType.monarch
-    # config.scale_attention_temperature = True
-    # config.efficient_attention_num_steps = 3
-    # config.efficient_attention_step_size = 2.5
-    # config.efficient_attention_block_size = 14
-    # evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
-    # evaluate_runtime_and_flops(config)
+    # Monarch
+    config = get_config()
+    config.attention_type = AttentionType.monarch
+    config.scale_attention_temperature = True
+    config.efficient_attention_num_steps = 3
+    config.efficient_attention_step_size = 2.5
+    config.efficient_attention_block_size = 14
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_runtime_and_flops(config)
 
     # TODO: Add baselines here
 

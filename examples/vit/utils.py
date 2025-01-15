@@ -40,14 +40,14 @@ def _register_qk_hook(
         attn_layer.key.register_forward_hook(key_hook(layer_idx))
 
 
+@torch.no_grad()
 def extract_qk(
-    model: CustomViTForImageClassification, inputs: Dict[str, Dict]
+    model: CustomViTForImageClassification, inputs: Dict[str, Tensor]
 ) -> Tuple[Tensor, Tensor]:
     all_layer_intermediates = [{} for _ in range(len(model.vit.encoder.layer))]
     _register_qk_hook(model, all_layer_intermediates)
 
-    with torch.no_grad():
-        model(**inputs["image"])
+    model(**inputs)
 
     query = torch.stack(
         [
@@ -65,6 +65,7 @@ def extract_qk(
     return query, key
 
 
+@torch.no_grad()
 def calibrate_sparsemax_temperature(
     query_list: List[Tensor], key_list: List[Tensor], attention_temperature_vals: Tensor
 ) -> Tensor:
@@ -93,6 +94,7 @@ def calibrate_sparsemax_temperature(
             softmax_attn_weights - sparsemax_attn_weights, start_dim=-2
         )
         differences += torch.linalg.norm(attn_weights_diff, ord=inf, dim=-1)
+
     optimal_temperature_idx = differences.min(dim=-1)[1]
     optimal_temperature = attention_temperature_vals[optimal_temperature_idx]
     return optimal_temperature

@@ -1,7 +1,8 @@
 from enum import StrEnum
+from typing import Optional
 
+import datasets
 import torch
-from datasets import load_dataset
 from torch.utils.data import DataLoader, Dataset
 from transformers import RobertaTokenizerFast
 
@@ -30,10 +31,13 @@ GLUE_TASK_TO_KEYS = {
 
 
 def glue_dataloader(
-    task_name: GlueTaskName, batch_size: int = 1, streaming: bool = True
+    task_name: GlueTaskName,
+    batch_size: int = 1,
+    streaming: bool = True,
+    num_samples: Optional[int] = None,
 ) -> DataLoader:
 
-    dataset = load_dataset(
+    dataset = datasets.load_dataset(
         "nyu-mll/glue",
         task_name,
         split=(
@@ -54,12 +58,22 @@ def glue_dataloader(
         result = tokenizer(
             *texts,
             padding="max_length",
-            max_length=512,
+            max_length=16,
             truncation=True,
             return_tensors="pt",
         )
         result["labels"] = example["label"]
         return result
+
+    if num_samples is not None:
+        if streaming:
+            assert isinstance(dataset, datasets.IterableDataset)
+            dataset = dataset.take(num_samples)
+        else:
+            assert isinstance(dataset, datasets.Dataset)
+            dataset = dataset.select(range(num_samples))
+
+    dataset = dataset.map(preprocess_fn, batched=not streaming, remove_columns=dataset.column_names)  # type: ignore
 
     def collate_fn(examples):
         input_ids = torch.cat([example["input_ids"] for example in examples])
@@ -70,8 +84,6 @@ def glue_dataloader(
             "attention_mask": attention_mask,
             "labels": labels,
         }
-
-    dataset = dataset.map(preprocess_fn, batched=not streaming, remove_columns=dataset.column_names)  # type: ignore
 
     assert isinstance(dataset, Dataset)
     dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
