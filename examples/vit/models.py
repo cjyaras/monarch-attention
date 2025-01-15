@@ -1,9 +1,11 @@
 from enum import StrEnum
 from math import sqrt
+from tokenize import maybe
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from common.utils import maybe_compile
 from entmax import sparsemax
 from torch._prims_common import DeviceLikeType
 from transformers.models.vit.configuration_vit import ViTConfig
@@ -75,43 +77,40 @@ class CustomViTSelfAttention(ViTSelfAttention):
             if self.attention_type == AttentionType.low_rank:
                 rank = config.efficient_attention_rank
                 assert rank is not None
-                self.efficient_attn = torch.compile(
-                    LowRankMHA(
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        rank=rank,
-                    ),
-                    mode="reduce-overhead",
+                self.efficient_attn = LowRankMHA(
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    rank=rank,
                 )
 
             elif self.attention_type == AttentionType.monarch:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchMHA(
-                        block_size=block_size,
-                        num_steps=num_steps,
-                        step_size=step_size,
-                        pad_type=pad_type,  # type: ignore
-                    ),
-                    mode="reduce-overhead",
+                self.efficient_attn = MonarchMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,
                 )
 
             elif self.attention_type == AttentionType.monarch_block_diagonal:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchBlockDiagonalMHA(
-                        block_size, num_steps, step_size, pad_type  # type: ignore
-                    ),
-                    model="reduce-overhead",
+                self.efficient_attn = MonarchBlockDiagonalMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,
                 )
 
-            # TODO: Add baselines set-up logic here
-            else:
-                raise ValueError(f"Invalid attention type: {self.attention_type}")
+            maybe_compile(self.efficient_attn)
+
+        # TODO: Add baselines set-up logic here
+
+        else:
+            raise ValueError(f"Invalid attention type: {self.attention_type}")
 
         if config.scale_attention_temperature:
             self.register_buffer(

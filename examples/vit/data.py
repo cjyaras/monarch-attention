@@ -2,16 +2,15 @@ from typing import Optional
 
 import datasets
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from transformers import ViTImageProcessorFast
 
 
 def imagenet_dataloader(
-    batch_size: int = 1, streaming: bool = True, num_samples: Optional[int] = None
+    batch_size: int = 1, num_samples: Optional[int] = None
 ) -> DataLoader:
-    dataset = datasets.load_dataset(
-        "imagenet-1k", split="validation", streaming=streaming
-    )
+    dataset = datasets.load_dataset("imagenet-1k", split="validation", streaming=True)
+    assert isinstance(dataset, datasets.IterableDataset)
     image_processor = ViTImageProcessorFast.from_pretrained(
         "google/vit-base-patch16-224"
     )
@@ -23,12 +22,7 @@ def imagenet_dataloader(
         return result
 
     if num_samples is not None:
-        if streaming:
-            assert isinstance(dataset, datasets.IterableDataset)
-            dataset = dataset.take(num_samples)
-        else:
-            assert isinstance(dataset, datasets.Dataset)
-            dataset = dataset.select(range(num_samples))
+        dataset = dataset.take(num_samples)
 
     dataset = dataset.map(
         preprocess_fn, batched=not streaming, remove_columns=dataset.column_names  # type: ignore
@@ -39,6 +33,5 @@ def imagenet_dataloader(
         labels = torch.tensor([example["labels"] for example in examples])
         return {"pixel_values": pixel_values, "labels": labels}
 
-    assert isinstance(dataset, Dataset)
-    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)
+    dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)  # type: ignore
     return dataloader

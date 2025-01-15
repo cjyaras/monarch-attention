@@ -21,7 +21,7 @@ def evaluate_accuracy(
 
     device = get_device()
     dataloader = glue_dataloader(
-        task_name, batch_size=batch_size, num_samples=num_samples, streaming=True
+        task_name, batch_size=batch_size, num_samples=num_samples
     )
     model = get_model(task_name, config, device)
     metric = GlueMetric(task_name)

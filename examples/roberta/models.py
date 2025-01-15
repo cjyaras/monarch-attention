@@ -5,6 +5,7 @@ from math import sqrt
 from typing import Optional, Tuple
 
 import torch
+from common.utils import maybe_compile
 from entmax import sparsemax
 from huggingface_hub import snapshot_download
 from roberta.data import GlueTaskName
@@ -88,48 +89,33 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
                     step_size=step_size,
                     rank=rank,
                 )
-                # self.efficient_attn = torch.compile(
-                #     LowRankMHA(
-                #         num_steps=num_steps,
-                #         step_size=step_size,
-                #         rank=rank,
-                #     ),
-                #     mode="reduce-overhead",
-                # )
 
             elif self.attention_type == AttentionType.monarch:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                # self.efficient_attn = torch.compile(
-                #     MonarchMHA(
-                #         block_size=block_size,
-                #         num_steps=num_steps,
-                #         step_size=step_size,
-                #         pad_type=pad_type,  # type: ignore
-                #     ),
-                #     mode="reduce-overhead",
-                # )
                 self.efficient_attn = MonarchMHA(
                     block_size=block_size,
                     num_steps=num_steps,
                     step_size=step_size,
-                    pad_type=pad_type,  # type: ignore
+                    pad_type=pad_type,
                 )
 
             elif self.attention_type == AttentionType.monarch_block_diagonal:
                 block_size = config.efficient_attention_block_size
                 pad_type = config.efficient_attention_pad_type
                 assert block_size is not None and pad_type is not None
-                self.efficient_attn = torch.compile(
-                    MonarchBlockDiagonalMHA(
-                        block_size, num_steps, step_size, pad_type  # type: ignore
-                    ),
-                    mode="reduce-overhead",
+                self.efficient_attn = MonarchBlockDiagonalMHA(
+                    block_size=block_size,
+                    num_steps=num_steps,
+                    step_size=step_size,
+                    pad_type=pad_type,
                 )
 
-            else:
-                raise ValueError(f"Invalid attention type: {self.attention_type}")
+            maybe_compile(self.efficient_attn)
+
+        else:
+            raise ValueError(f"Invalid attention type: {self.attention_type}")
 
         self.enable_flash_attention = config.enable_flash_attention
 

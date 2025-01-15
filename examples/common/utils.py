@@ -14,6 +14,11 @@ def get_device() -> DeviceLikeType:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def maybe_compile(module: nn.Module):
+    if torch.cuda.is_available():
+        module.compile()
+
+
 def move(obj: T, device: DeviceLikeType) -> T:
     if isinstance(obj, torch.Tensor):
         return obj.to(device)  # type: ignore

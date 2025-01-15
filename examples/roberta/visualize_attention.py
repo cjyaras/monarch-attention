@@ -14,9 +14,9 @@ from sobalib.layers import LowRankMHA, MonarchMHA, PadType
 @torch.no_grad()
 def main():
     device = get_device()
-    inputs = move(next(iter(glue_dataloader(GlueTaskName.cola))), device)
+    inputs = move(next(iter(glue_dataloader(GlueTaskName.qqp, min_length=256))), device)
     config = get_config()
-    model = get_model(GlueTaskName.cola, config, device)
+    model = get_model(GlueTaskName.qqp, config, device)
 
     attention_mask = inputs["attention_mask"]
     print(attention_mask)
@@ -33,7 +33,7 @@ def main():
     attn_scores = (
         query @ key.transpose(-1, -2) / sqrt(query.shape[-1]) + attention_mask_inf
     )[0, 0]
-    efficient_attn = MonarchMHA(4, 50, 0.1, PadType.post)
+    efficient_attn = MonarchMHA(4, 10, 1.0, PadType.post)
     # efficient_attn = LowRankMHA(100, 50, 1.0)
 
     fig, ax = plt.subplots(1, 2, figsize=(10, 5))
