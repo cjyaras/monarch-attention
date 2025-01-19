@@ -1,13 +1,13 @@
 from typing import Dict, List, Tuple
 
 import torch
-from roberta.models import CustomRobertaForSequenceClassification
+from models import CustomRobertaForQuestionAnswering
 
 Tensor = torch.Tensor
 
 
 def _register_qk_hook(
-    model: CustomRobertaForSequenceClassification,
+    model: CustomRobertaForQuestionAnswering,
     all_layer_intermediates: List[Dict[str, torch.Tensor]],
 ):
     layers = model.roberta.encoder.layer
@@ -37,7 +37,7 @@ def _register_qk_hook(
 
 @torch.no_grad()
 def extract_qk(
-    model: CustomRobertaForSequenceClassification, inputs: Dict[str, Tensor]
+    model: CustomRobertaForQuestionAnswering, inputs: Dict[str, Tensor]
 ) -> Tuple[Tensor, Tensor]:
     all_layer_intermediates = [{} for _ in range(len(model.roberta.encoder.layer))]
     _register_qk_hook(model, all_layer_intermediates)

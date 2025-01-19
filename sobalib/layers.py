@@ -6,12 +6,13 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from torch._prims_common import DeviceLikeType
+from torch.distributions import Dirichlet
 from torch.nn.functional import pad
 
 Tensor = torch.Tensor
 
 
-def _fast_simplex_init(
+def _simplex_init(
     shape: Tuple[int, ...],
     perturb_scale: Optional[float] = None,
     device: Optional[DeviceLikeType] = None,
@@ -22,6 +23,8 @@ def _fast_simplex_init(
         return center + noise
     else:
         return center * torch.ones(shape, device=device)
+    # else:
+    #     return Dirichlet(torch.tensor([1.0] * shape[-1])).sample(shape[:-1])
 
 
 def _project(x: Tensor, u: Tensor) -> Tensor:
@@ -90,10 +93,12 @@ class LowRankMHA(nn.Module):
             attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
         return attention_mask
 
-    def _mask(self, right_params: Tensor, valid_mask: Optional[Tensor]) -> Tensor:
+    def _mask(
+        self, left_params, right_params: Tensor, valid_mask: Optional[Tensor]
+    ) -> Tuple[Tensor, Tensor]:
         if valid_mask is None:
-            return right_params
-        return right_params * valid_mask
+            return left_params, right_params
+        return left_params * valid_mask.transpose(-1, -2), right_params * valid_mask
 
     def _grad(
         self,
@@ -121,27 +126,35 @@ class LowRankMHA(nn.Module):
     ) -> Tuple[Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
-        left_params = _fast_simplex_init(
+        if valid_mask is not None:
+            query = query * valid_mask.transpose(-1, -2)
+            key = key * valid_mask.transpose(-1, -2)
+
+        left_params = _simplex_init(
             (batch_size, num_heads, seq_len, self.rank),
-            perturb_scale=1e-1,
+            perturb_scale=0.1,
             device=query.device,
         )
-        right_params = _fast_simplex_init(
+        right_params = _simplex_init(
             (batch_size, num_heads, self.rank, seq_len),
-            perturb_scale=1e-1,
+            perturb_scale=0.1,
             device=query.device,
         )
 
         for _ in range(self.num_steps):
-            right_params = self._mask(right_params, valid_mask)
+            left_params, right_params = self._mask(
+                left_params, right_params, valid_mask
+            )
             d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key
             )
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
 
+        left_params, right_params = self._mask(left_params, right_params, valid_mask)
+
         left = _safe_normalize(left_params, dim=-1) ** 2
-        right = _safe_normalize(self._mask(right_params, valid_mask), dim=-1) ** 2
+        right = _safe_normalize(right_params, dim=-1) ** 2
 
         return left, right
 
@@ -167,7 +180,11 @@ class MonarchMHA(nn.Module):
         self.pad_type = pad_type
 
     def get_matrix(
-        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+        self,
+        query: Tensor,
+        key: Tensor,
+        attention_mask: Optional[Tensor] = None,
+        return_history: bool = False,
     ) -> Tensor:
         assert query.shape == key.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
@@ -177,7 +194,9 @@ class MonarchMHA(nn.Module):
         query = query / sqrt(head_dim)
         pad_amount = self._get_pad_amount(seq_len)
         valid_mask = self._get_valid_mask(attention_mask)
-        left, right = self._get_factors(query, key, valid_mask)
+        left, right = self._get_factors(
+            query, key, valid_mask, return_history=return_history
+        )
         matrix = self._get_matrix_from_factors(left, right, pad_amount)
         return matrix
 
@@ -215,10 +234,10 @@ class MonarchMHA(nn.Module):
             (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         x = pad(inputs, pad_t)
-        X = rearrange(x, "... (k i) h -> ... k i h", i=self.block_size)
-        Y = torch.einsum("...kji,...kih->...kjh", right, X)
-        Z = torch.einsum("...jlk,...kjh->...ljh", left, Y)
-        z = rearrange(Z, "... l j h -> ... (l j) h")
+        X = rearrange(x, "... (k i) v -> ... k i v", i=self.block_size)
+        Y = torch.einsum("...kji,...kiv->...kjv", right, X)
+        Z = torch.einsum("...jlk,...kjv->...ljv", left, Y)
+        z = rearrange(Z, "... l j v -> ... (l j) v")
 
         if self.pad_type == PadType.pre:
             return z[..., pad_amount:, :]
@@ -242,30 +261,46 @@ class MonarchMHA(nn.Module):
         return attention_mask
 
     def _mask(
-        self, right_params: Tensor, valid_mask: Optional[Tensor], pad_amount: int
-    ) -> Tensor:
+        self,
+        left_params: Tensor,
+        right_params: Tensor,
+        valid_mask: Optional[Tensor],
+        pad_amount: int,
+    ) -> Tuple[Tensor, Tensor]:
+        left_params_flat = rearrange(left_params, "... j l k -> ... (l j) k")
         right_params_flat = rearrange(right_params, "... k j i -> ... j (k i)")
 
         if self.pad_type == PadType.pre:
+            left_params_flat[..., :pad_amount, :] = 0.0
             right_params_flat[..., :pad_amount] = 0.0
 
             if valid_mask is not None:
+                left_params_flat[..., pad_amount:, :] = left_params_flat[
+                    ..., pad_amount:, :
+                ] * valid_mask.transpose(-1, -2)
                 right_params_flat[..., pad_amount:] = (
                     right_params_flat[..., pad_amount:] * valid_mask
                 )
         else:
+            left_params_flat[..., -pad_amount or left_params_flat.shape[-2] :, :] = 0.0
             right_params_flat[..., -pad_amount or right_params_flat.shape[-1] :] = 0.0
 
             if valid_mask is not None:
+                left_params_flat[..., : -pad_amount or None, :] = left_params_flat[
+                    ..., : -pad_amount or None, :
+                ] * valid_mask.transpose(-1, -2)
                 right_params_flat[..., : -pad_amount or None] = (
                     right_params_flat[..., : -pad_amount or None] * valid_mask
                 )
 
+        left_params = rearrange(
+            left_params_flat, "... (l j) k -> ... j l k", j=self.block_size
+        )
         right_params = rearrange(
             right_params_flat, "... j (k i) -> ... k j i", i=self.block_size
         )
 
-        return right_params
+        return left_params, right_params
 
     def _grad(
         self,
@@ -280,56 +315,105 @@ class MonarchMHA(nn.Module):
         right = right_sphere**2
         d_left = torch.einsum(
             "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
-        ) - torch.einsum("...kji,...ljh,...kih->...jlk", right, query, key)
+        ) - torch.einsum("...kji,...ljv,...kiv->...jlk", right, query, key)
         d_left = d_left * 2 * left_sphere
         d_left = d_left - _project(left_sphere, d_left)
         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
         d_right = torch.einsum(
             "...jk,...kji->...kji", torch.sum(left**2, dim=-2), right
-        ) - torch.einsum("...jlk,...ljh,...kih->...kji", left, query, key)
+        ) - torch.einsum("...jlk,...ljv,...kiv->...kji", left, query, key)
         d_right = d_right * 2 * right_sphere
         d_right = d_right - _project(right_sphere, d_right)
         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
         return d_left, d_right
 
     def _get_factors(
-        self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
+        self,
+        query: Tensor,
+        key: Tensor,
+        valid_mask: Optional[Tensor],
+        return_history: bool = False,
     ) -> Tuple[Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
         pad_amount = self._get_pad_amount(seq_len)
         num_blocks = self._get_num_blocks(seq_len)
+
+        if valid_mask is not None:
+            query = query * valid_mask.transpose(-1, -2)
+            key = key * valid_mask.transpose(-1, -2)
 
         pad_t = (0, 0) + (
             (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
-        query = rearrange(query, "... (l j) h -> ... l j h", j=self.block_size)
-        key = rearrange(key, "... (k i) h -> ... k i h", i=self.block_size)
+        query = rearrange(query, "... (l j) v -> ... l j v", j=self.block_size)
+        key = rearrange(key, "... (k i) v -> ... k i v", i=self.block_size)
 
-        left_params = _fast_simplex_init(
+        left_params = torch.full(
             (batch_size, num_heads, self.block_size, num_blocks, num_blocks),
+            1 / sqrt(num_blocks),
             device=query.device,
         )
-        right_params = _fast_simplex_init(
+        right_params = torch.full(
             (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
+            1 / sqrt(self.block_size),
             device=query.device,
         )
 
-        for _ in range(self.num_steps):
-            right_params = self._mask(right_params, valid_mask, pad_amount)
+        left_params, right_params = self._mask(
+            left_params, right_params, valid_mask, pad_amount
+        )
+
+        if return_history:
+            left_params_history = torch.zeros(
+                (
+                    batch_size,
+                    num_heads,
+                    self.num_steps + 1,
+                    self.block_size,
+                    num_blocks,
+                    num_blocks,
+                ),
+                device=query.device,
+            )
+            right_params_history = torch.zeros(
+                (
+                    batch_size,
+                    num_heads,
+                    self.num_steps + 1,
+                    num_blocks,
+                    self.block_size,
+                    self.block_size,
+                ),
+                device=query.device,
+            )
+
+            left_params_history[:, :, 0] = left_params
+            right_params_history[:, :, 0] = right_params
+
+        for step in range(1, self.num_steps + 1):
             d_left_params, d_right_params = self._grad(
                 left_params, right_params, query, key
             )
+
             left_params = left_params - self.step_size * d_left_params
             right_params = right_params - self.step_size * d_right_params
 
-        left = _safe_normalize(left_params, dim=-1) ** 2
-        right = (
-            _safe_normalize(self._mask(right_params, valid_mask, pad_amount), dim=-1)
-            ** 2
-        )
+            left_params, right_params = self._mask(
+                left_params, right_params, valid_mask, pad_amount
+            )
 
+            if return_history:
+                left_params_history[:, :, step] = left_params
+                right_params_history[:, :, step] = right_params
+
+        if return_history:
+            left_params = left_params_history
+            right_params = right_params_history
+
+        left = _safe_normalize(left_params, dim=-1) ** 2
+        right = _safe_normalize(right_params, dim=-1) ** 2
         return left, right
 
 
@@ -349,7 +433,11 @@ class MonarchBlockDiagonalMHA(nn.Module):
         self.pad_type = pad_type
 
     def get_matrix(
-        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+        self,
+        query: Tensor,
+        key: Tensor,
+        attention_mask: Optional[Tensor] = None,
+        return_history: bool = True,
     ) -> Tensor:
         assert query.shape == key.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
@@ -359,7 +447,9 @@ class MonarchBlockDiagonalMHA(nn.Module):
         query = query / sqrt(head_dim)
         pad_amount = self._get_pad_amount(seq_len)
         valid_mask = self._get_valid_mask(attention_mask)
-        block_diag, left, right = self._get_factors(query, key, valid_mask)
+        block_diag, left, right = self._get_factors(
+            query, key, valid_mask, return_history=return_history
+        )
         matrix = self._get_matrix_from_factors(block_diag, left, right, pad_amount)
         return matrix
 
@@ -400,12 +490,12 @@ class MonarchBlockDiagonalMHA(nn.Module):
         )
 
         x = pad(inputs, pad_t)
-        X = rearrange(x, "... (k i) h -> ... k i h", i=self.block_size)
+        X = rearrange(x, "... (k i) v -> ... k i v", i=self.block_size)
 
-        Y = torch.einsum("...kji,...kih->...kjh", right, X)
-        Z = torch.einsum("...jlk,...kjh->...ljh", left, Y)
-        Z = Z + torch.einsum("...ljk,...lkh->...ljh", block_diag, X)
-        z = rearrange(Z, "... l j h -> ... (l j) h")
+        Y = torch.einsum("...kji,...kiv->...kjv", right, X)
+        Z = torch.einsum("...jlk,...kjv->...ljv", left, Y)
+        Z = Z + torch.einsum("...ljk,...lkv->...ljv", block_diag, X)
+        z = rearrange(Z, "... l j v -> ... (l j) v")
 
         if self.pad_type == PadType.pre:
             return z[..., pad_amount:, :]
@@ -462,12 +552,16 @@ class MonarchBlockDiagonalMHA(nn.Module):
 
         if self.pad_type == PadType.pre:
             block_diag_flat_params_transposed[..., :pad_amount] = 0.0
+            left_flat_params[..., :pad_amount, :] = 0.0
             right_flat_params_transposed[..., :pad_amount] = 0.0
 
             if valid_mask is not None:
                 block_diag_flat_params_transposed[..., pad_amount:] = (
                     block_diag_flat_params_transposed[..., pad_amount:] * valid_mask
                 )
+                left_flat_params[..., pad_amount:, :] = left_flat_params[
+                    ..., pad_amount:, :
+                ] * valid_mask.transpose(-1, -2)
                 right_flat_params_transposed[..., pad_amount:] = (
                     right_flat_params_transposed[..., pad_amount:] * valid_mask
                 )
@@ -475,6 +569,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
             block_diag_flat_params_transposed[
                 ..., -pad_amount or block_diag_flat_params_transposed.shape[-1] :
             ] = 0.0
+            left_flat_params[..., -pad_amount or left_flat_params.shape[-2] :, :] = 0.0
             right_flat_params_transposed[
                 ..., -pad_amount or right_flat_params_transposed.shape[-1] :
             ] = 0.0
@@ -484,6 +579,9 @@ class MonarchBlockDiagonalMHA(nn.Module):
                     block_diag_flat_params_transposed[..., : -pad_amount or None]
                     * valid_mask
                 )
+                left_flat_params[..., : -pad_amount or None, :] = left_flat_params[
+                    ..., : -pad_amount or None, :
+                ] * valid_mask.transpose(-1, -2)
                 right_flat_params_transposed[..., : -pad_amount or None] = (
                     right_flat_params_transposed[..., : -pad_amount or None]
                     * valid_mask
@@ -537,7 +635,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
 
         d_left = torch.einsum(
             "...kj,...jlk->...jlk", torch.sum(right**2, dim=-1), left
-        ) - torch.einsum("...kji,...ljh,...kih->...jlk", right, query, key)
+        ) - torch.einsum("...kji,...ljv,...kiv->...jlk", right, query, key)
 
         d_left[..., torch.arange(num_blocks), torch.arange(num_blocks)] += torch.einsum(
             "...ijk,...ijk->...ji", right, block_diag
@@ -545,7 +643,7 @@ class MonarchBlockDiagonalMHA(nn.Module):
 
         d_right = (
             torch.einsum("...jk,...kji->...kji", torch.sum(left**2, dim=-2), right)
-            - torch.einsum("...jlk,...ljh,...kih->...kji", left, query, key)
+            - torch.einsum("...jlk,...ljv,...kiv->...kji", left, query, key)
             + torch.einsum("...jii,...ijk->...ijk", left, block_diag)
         )
 
@@ -572,38 +670,77 @@ class MonarchBlockDiagonalMHA(nn.Module):
         return d_block_diag_flat_and_left_flat, d_right
 
     def _get_factors(
-        self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
+        self,
+        query: Tensor,
+        key: Tensor,
+        valid_mask: Optional[Tensor],
+        return_history: bool = False,
     ) -> Tuple[Tensor, Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
         pad_amount = self._get_pad_amount(seq_len)
         num_blocks = self._get_num_blocks(seq_len)
         padded_seq_len = seq_len + pad_amount
 
+        if valid_mask is not None:
+            query = query * valid_mask.transpose(-1, -2)
+            key = key * valid_mask.transpose(-1, -2)
+
         pad_t = (0, 0) + (
             (pad_amount, 0) if self.pad_type == PadType.pre else (0, pad_amount)
         )
         query = pad(query, pad_t)
         key = pad(key, pad_t)
-        query = rearrange(query, "... (l j) h -> ... l j h", j=self.block_size)
-        key = rearrange(key, "... (k i) h -> ... k i h", i=self.block_size)
+        query = rearrange(query, "... (l j) v -> ... l j v", j=self.block_size)
+        key = rearrange(key, "... (k i) v -> ... k i v", i=self.block_size)
 
-        block_diag_flat_and_left_flat_params = _fast_simplex_init(
+        block_diag_flat_and_left_flat_params = torch.full(
             (batch_size, num_heads, padded_seq_len, self.block_size + num_blocks),
+            1 / sqrt(self.block_size + num_blocks),
             device=query.device,
         )
 
-        right_params = _fast_simplex_init(
+        right_params = torch.full(
             (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
+            1 / sqrt(self.block_size),
             device=query.device,
         )
 
-        for _ in range(self.num_steps):
-            block_diag_flat_and_left_flat_params, right_params = self._mask(
-                block_diag_flat_and_left_flat_params,
-                right_params,
-                valid_mask,
-                pad_amount,
+        block_diag_flat_and_left_flat_params, right_params = self._mask(
+            block_diag_flat_and_left_flat_params,
+            right_params,
+            valid_mask,
+            pad_amount,
+        )
+
+        if return_history:
+            block_diag_flat_and_left_flat_params_history = torch.zeros(
+                (
+                    batch_size,
+                    num_heads,
+                    self.num_steps + 1,
+                    padded_seq_len,
+                    self.block_size + num_blocks,
+                ),
+                device=query.device,
             )
+            right_params_history = torch.zeros(
+                (
+                    batch_size,
+                    num_heads,
+                    self.num_steps + 1,
+                    num_blocks,
+                    self.block_size,
+                    self.block_size,
+                ),
+                device=query.device,
+            )
+
+            block_diag_flat_and_left_flat_params_history[:, :, 0] = (
+                block_diag_flat_and_left_flat_params
+            )
+            right_params_history[:, :, 0] = right_params
+
+        for step in range(1, self.num_steps + 1):
             d_block_diag_flat_and_left_flat_params, d_right_params = self._grad(
                 block_diag_flat_and_left_flat_params, right_params, query, key
             )
@@ -612,6 +749,25 @@ class MonarchBlockDiagonalMHA(nn.Module):
                 - self.step_size * d_block_diag_flat_and_left_flat_params
             )
             right_params = right_params - self.step_size * d_right_params
+
+            block_diag_flat_and_left_flat_params, right_params = self._mask(
+                block_diag_flat_and_left_flat_params,
+                right_params,
+                valid_mask,
+                pad_amount,
+            )
+
+            if return_history:
+                block_diag_flat_and_left_flat_params_history[:, :, step] = (
+                    block_diag_flat_and_left_flat_params
+                )
+                right_params_history[:, :, step] = right_params
+
+        if return_history:
+            block_diag_flat_and_left_flat_params = (
+                block_diag_flat_and_left_flat_params_history
+            )
+            right_params = right_params_history
 
         block_diag_flat_and_left_flat = (
             _safe_normalize(block_diag_flat_and_left_flat_params, dim=-1) ** 2

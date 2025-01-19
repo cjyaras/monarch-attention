@@ -1,6 +1,6 @@
 import torch
 from common.utils import calibrate_sparsemax_temperature, get_device, move
-from data import imagenet_dataloader
+from data import squad_dataloader
 from models import get_config, get_model
 from utils import extract_qk
 
@@ -8,7 +8,7 @@ from utils import extract_qk
 @torch.no_grad()
 def main():
     device = get_device()
-    inputs = move(next(iter(imagenet_dataloader())), device)
+    inputs = move(next(iter(squad_dataloader(batch_size=4))), device)
     config = get_config()
     model = get_model(config, device)
 
@@ -20,12 +20,12 @@ def main():
     )
     torch.save(
         {
-            f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
+            f"roberta.encoder.layer.{i}.attention.self.attention_temperature": optimal_temperature[
                 i
             ]
             for i in range(len(optimal_temperature))
         },
-        "vit/sparsemax_temperature.pt",
+        "roberta/sparsemax_temperature.pt",
     )
 
 

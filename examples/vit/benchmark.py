@@ -2,11 +2,11 @@ from typing import Optional
 
 import torch
 from common.utils import benchmark_flops, benchmark_time, get_device, move
+from data import imagenet_dataloader
+from metrics import TopKAccuracyMetric
+from models import AttentionType, CustomViTConfig, get_config, get_model
 from tqdm import tqdm
 from transformers.utils import logging
-from vit.data import imagenet_dataloader
-from vit.metrics import TopKAccuracyMetric
-from vit.models import AttentionType, CustomViTConfig, get_config, get_model
 
 logging.set_verbosity_error()
 
