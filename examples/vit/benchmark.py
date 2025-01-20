@@ -83,7 +83,38 @@ def main():
     evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
     evaluate_runtime_and_flops(config)
 
-    # TODO: Add baselines here
+    # ---------- BASELINES ---------- #
+
+    # Linformer
+    config = get_config()
+    config.attention_type = AttentionType.linformer
+    config.efficient_attention_rank = 64
+    config.share_kv = False
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_runtime_and_flops(config)
+
+    # Performer
+    config = get_config()
+    config.attention_type = AttentionType.performer
+    config.efficient_attention_rank = 64
+    config.estimator_type = 'trig'
+    config.ortho_features = False
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_runtime_and_flops(config)
+
+    # Nystromformer 
+    config = get_config()
+    config.attention_type = AttentionType.nystromformer
+    config.efficient_attention_rank = 64
+    config.conv_kernel_size = None
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_runtime_and_flops(config)
+
+    # Cosformer
+    config = get_config()
+    config.attention_type = AttentionType.cosformer
+    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_runtime_and_flops(config)
 
 
 if __name__ == "__main__":
