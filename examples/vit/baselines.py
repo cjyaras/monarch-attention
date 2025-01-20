@@ -205,7 +205,7 @@ class Nystromformer(nn.Module):
     def _iterative_pinv(self, mat: Tensor, n_iter: int = 6) -> Tensor:
         I = torch.eye(mat.shape[-1], device = mat.device)
 
-        init_coef = torch.max(torch.sum(torch.abs(mat), dim=-2)) * torch.max(torch.sum(torch.abs(mat), dim=-2))
+        init_coef = torch.max(torch.sum(torch.abs(mat), dim=-2)) * torch.max(torch.sum(torch.abs(mat), dim=-1))
         out = mat.transpose(-2, -1) / init_coef
 
         for _ in range(n_iter):
