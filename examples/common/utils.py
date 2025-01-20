@@ -80,7 +80,11 @@ def calibrate_sparsemax_temperature(
         device=query_list[0].device,
     )
 
-    for query, key in tqdm(zip(query_list, key_list)):
+    num_examples = len(query_list)
+
+    for i in tqdm(range(num_examples)):
+        query = query_list[i]
+        key = key_list[i]
         attn_weights = query @ key.transpose(-1, -2) / sqrt(query.size(-1))
         softmax_attn_weights = softmax(attn_weights, dim=-1)[..., None, :, :]
         sparsemax_attn_weights = sparsemax(

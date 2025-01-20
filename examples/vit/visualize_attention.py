@@ -10,6 +10,9 @@ from utils import extract_qk
 
 from sobalib.layers import MonarchMHA, PadType
 
+LAYER = 0
+HEAD = 5
+
 
 @torch.no_grad()
 def main():

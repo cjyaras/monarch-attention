@@ -28,7 +28,7 @@ def main():
     sparsemax_temps = torch.load("roberta/sparsemax_temperature.pt", weights_only=True)
     query, key = extract_qk(model, inputs)
 
-    layer, head = 2, 10
+    layer, head = 8, 10
 
     attention_mask = inputs["attention_mask"]
     num_valid_idx = int(torch.sum(attention_mask, dim=-1))
@@ -49,7 +49,7 @@ def main():
 
     true_loss_val = loss_fn(attn_probs, attn_scores).item()
 
-    for learning_rate in [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0]:
+    for learning_rate in [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0]:
         num_blocks = 16
         num_steps = 40
         efficient_attn = MonarchMHA(num_blocks, num_steps, learning_rate, PadType.post)

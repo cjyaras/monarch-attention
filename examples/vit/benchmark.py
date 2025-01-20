@@ -55,23 +55,26 @@ def evaluate_runtime_and_flops(config: CustomViTConfig):
     print(f"{config.attention_type} attention flops: {flops_counts:0.2e}")
 
 
-def main():
+NUM_SAMPLES = 128
+BATCH_SIZE = 4
 
-    num_samples = 100
-    batch_size = 4
+
+def main():
 
     # Softmax
     config = get_config()
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
     config.scale_attention_temperature = True
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
+
+    exit()
 
     # Monarch
     config = get_config()
@@ -80,7 +83,7 @@ def main():
     config.efficient_attention_num_steps = 3
     config.efficient_attention_step_size = 2.5
     config.efficient_attention_block_size = 14
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
     # ---------- BASELINES ---------- #
@@ -90,30 +93,30 @@ def main():
     config.attention_type = AttentionType.linformer
     config.efficient_attention_rank = 64
     config.share_kv = False
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
     # Performer
     config = get_config()
     config.attention_type = AttentionType.performer
     config.efficient_attention_rank = 64
-    config.estimator_type = 'trig'
+    config.estimator_type = "trig"
     config.ortho_features = False
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
-    # Nystromformer 
+    # Nystromformer
     config = get_config()
     config.attention_type = AttentionType.nystromformer
     config.efficient_attention_rank = 64
     config.conv_kernel_size = None
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
     # Cosformer
     config = get_config()
     config.attention_type = AttentionType.cosformer
-    evaluate_accuracy(config, batch_size=batch_size, num_samples=num_samples)
+    evaluate_accuracy(config, batch_size=BATCH_SIZE, num_samples=NUM_SAMPLES)
     evaluate_runtime_and_flops(config)
 
 
