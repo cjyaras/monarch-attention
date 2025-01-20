@@ -16,6 +16,7 @@ from transformers.models.vit.modeling_vit import (
 )
 
 from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA, PadType
+from baselines import Linformer, Performer, Nystromformer, Cosformer
 
 
 class AttentionType(StrEnum):
@@ -25,6 +26,9 @@ class AttentionType(StrEnum):
     monarch = "monarch"
     monarch_block_diagonal = "monarch-block-diagonal"
     linformer = "linformer"
+    performer = "performer"
+    nystromformer = "nystromformer"
+    cosformer = "cosformer"
 
 
 class CustomViTConfig(ViTConfig):
@@ -38,6 +42,10 @@ class CustomViTConfig(ViTConfig):
         efficient_attention_rank: Optional[int] = None,
         efficient_attention_block_size: Optional[int] = None,
         efficient_attention_pad_type: PadType = PadType.pre,
+        share_kv: bool = False,
+        estimator_type: str = 'pos',
+        ortho_features: bool = True, 
+        conv_kernel_size: int = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -50,7 +58,22 @@ class CustomViTConfig(ViTConfig):
         self.efficient_attention_block_size = efficient_attention_block_size
         self.efficient_attention_pad_type = efficient_attention_pad_type
 
-        # TODO: Add baselines config here
+        # Linformer
+        # self.efficient_attention_rank used as projection dim
+        self.share_kv = share_kv
+
+        # Performer
+        # self.efficient_attention_rank used as num_samples
+        self.estimator_type = estimator_type
+        self.ortho_features = ortho_features
+
+        # Nystromformer
+        # self.efficient_attention_rank used as number of landmarks
+        self.conv_kernel_size = conv_kernel_size
+
+        # Cosformer: none
+
+
 
 
 def get_config() -> CustomViTConfig:
@@ -66,6 +89,12 @@ class CustomViTSelfAttention(ViTSelfAttention):
         self.attention_type = config.attention_type
 
         if self.attention_type in [
+            AttentionType.softmax,
+            AttentionType.sparsemax
+        ]:
+            pass
+
+        elif self.attention_type in [
             AttentionType.low_rank,
             AttentionType.monarch,
             AttentionType.monarch_block_diagonal,
@@ -105,12 +134,56 @@ class CustomViTSelfAttention(ViTSelfAttention):
                     pad_type=pad_type,
                 )
 
-            else:
-                raise ValueError(f"Invalid attention type: {self.attention_type}")
-
             maybe_compile(self.efficient_attn)
 
-            # TODO: Add baselines set-up logic here
+        elif self.attention_type in [
+            AttentionType.linformer, 
+            AttentionType.performer,
+            AttentionType.nystromformer,
+            AttentionType.cosformer
+        ]:
+            assert isinstance(config.image_size, int) and isinstance(config.patch_size, int)
+            seq_len = (config.image_size // config.patch_size)**2 + 1 # TODO: cleaner way to get sequence length here?
+
+            if self.attention_type == AttentionType.linformer:
+                proj_dim = config.efficient_attention_rank
+                share_kv = config.share_kv
+                self.efficient_attn = Linformer(
+                    proj_dim=proj_dim,
+                    seq_len=seq_len,
+                    share_kv=share_kv
+                )
+            
+            elif self.attention_type == AttentionType.performer:
+                num_samples = config.efficient_attention_rank
+                estimator_type = config.estimator_type
+                ortho_features = config.ortho_features
+                self.efficient_attn = Performer(
+                    num_samples=num_samples,
+                    estimator_type=estimator_type,
+                    ortho_features=ortho_features
+                )
+            
+            elif self.attention_type == AttentionType.nystromformer:
+                num_landmarks = config.efficient_attention_rank
+                conv_kernel_size = config.conv_kernel_size
+                num_heads = config.num_attention_heads
+                self.efficient_attn = Nystromformer(
+                    num_landmarks=num_landmarks,
+                    num_heads=num_heads,
+                    conv_kernel_size=conv_kernel_size
+                )
+
+            elif self.attention_type == AttentionType.cosformer:
+                self.efficient_attn = Cosformer()
+                
+
+            maybe_compile(self.efficient_attn)
+        
+        else:
+                raise ValueError(f"Invalid attention type: {self.attention_type}")
+
+        
 
         if config.scale_attention_temperature:
             self.register_buffer(
