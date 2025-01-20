@@ -1,12 +1,11 @@
 from math import sqrt
-from typing import Optional
-
-from einops import rearrange
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from einops import rearrange
 
 Tensor = torch.Tensor
 
@@ -22,39 +21,52 @@ class Linformer(nn.Module):
         if not self.share_kv:
             self.F = torch.randn(proj_dim, seq_len)
 
-
-    def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         assert query.shape == key.shape
         return self._compute_attn_mat(query, key, attention_mask)
-        
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         assert query.shape == key.shape and key.shape == value.shape
 
         # Compute attention matrix
         attention_probs = self._compute_attn_mat(query, key, attention_mask)
 
         # Project values onto lower dim and compute output
-        value_proj = torch.matmul(self.F, value) if not self.share_kv else torch.matmul(self.E, value)
+        value_proj = (
+            torch.matmul(self.F, value)
+            if not self.share_kv
+            else torch.matmul(self.E, value)
+        )
         return torch.matmul(attention_probs, value_proj)
 
-
-    def _compute_attn_mat(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def _compute_attn_mat(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Project keys to lower dim
         key_proj = torch.matmul(self.E, key)
 
         # Compute (possibly masked) attention
-        attention_scores = torch.matmul(query, key_proj.transpose(-2, -1)) / sqrt(head_dim)
+        attention_scores = torch.matmul(query, key_proj.transpose(-2, -1)) / sqrt(
+            head_dim
+        )
         out = F.softmax(attention_scores, dim=-1)
         if attention_mask is not None:
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
-            out = self._renormalize( self._mask(out, valid_attention_mask) )
+            assert valid_attention_mask is not None
+            out = self._renormalize(self._mask(out, valid_attention_mask))
 
         return out
-    
 
     def _get_valid_mask(self, mask: Optional[Tensor]) -> Optional[Tensor]:
         if mask is not None:
@@ -63,11 +75,10 @@ class Linformer(nn.Module):
 
     def _mask(self, probs: Tensor, mask: Tensor) -> Tensor:
         return mask * probs * mask.transpose(-2, -1)
-    
+
     def _renormalize(self, mat: Tensor):
         return mat / torch.sum(mat, dim=-1, keepdim=True)
 
-        
 
 class Performer(nn.Module):
     def __init__(
@@ -84,27 +95,46 @@ class Performer(nn.Module):
         self.estimator_type = estimator_type
         self.ortho_features = ortho_features  # Flag to use orthogonal features or not
 
-    def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         assert query.shape == key.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape  
+        batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute Q', K' from paper
         query = query / sqrt(head_dim)
-        query_prime, key_prime = self._compute_performer_factors(query, key, attention_mask)
-        qk_ = torch.matmul(query_prime, key_prime.transpose(-2, -1)) # Q' @ K' product
+        query_prime, key_prime = self._compute_performer_factors(
+            query, key, attention_mask
+        )
+        qk_ = torch.matmul(query_prime, key_prime.transpose(-2, -1))  # Q' @ K' product
 
         # Compute normalization factor
-        d = torch.matmul( query_prime, torch.matmul(key_prime.transpose(-2, -1), torch.ones(batch_size, num_heads, seq_len)) ) 
+        d = torch.matmul(
+            query_prime,
+            torch.matmul(
+                key_prime.transpose(-2, -1), torch.ones(batch_size, num_heads, seq_len)
+            ),
+        )
 
-        return torch.einsum('...ij,...i->...ij', qk_, 1. / d) # Equivalant to torch.matmul( diag(d)^{-1}, qk_ ) in last 2 dims
+        return torch.einsum(
+            "...ij,...i->...ij", qk_, 1.0 / d
+        )  # Equivalant to torch.matmul( diag(d)^{-1}, qk_ ) in last 2 dims
 
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         assert query.shape == key.shape and key.shape == value.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
-        
-        # Compute Q', K', and C from paper 
-        query_prime, key_prime = self._compute_performer_factors(query, key, attention_mask)
-        C = torch.cat([value, torch.ones(batch_size, num_heads, seq_len, 1)], dim=-1)    
+
+        # Compute Q', K', and C from paper
+        query_prime, key_prime = self._compute_performer_factors(
+            query, key, attention_mask
+        )
+        C = torch.cat([value, torch.ones(batch_size, num_heads, seq_len, 1)], dim=-1)
 
         # Intermediate outputs for bidirectional attention
         buf1 = torch.matmul(key_prime.transpose(-2, -1), C)
@@ -113,13 +143,16 @@ class Performer(nn.Module):
         # Performer attention output
         buf3 = buf2[..., :head_dim]
         buf4 = buf2[..., head_dim:].squeeze()
-        return torch.einsum('...ij,...i->...ij', buf3, 1. / buf4) # Same as torch.matmul( diag(buf4)^{-1}, buf3 ) in last 2 dims
+        return torch.einsum(
+            "...ij,...i->...ij", buf3, 1.0 / buf4
+        )  # Same as torch.matmul( diag(buf4)^{-1}, buf3 ) in last 2 dims
 
-
-    def _compute_performer_factors(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def _compute_performer_factors(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
-    
-        # Compute Q', K', and C from paper 
+
+        # Compute Q', K', and C from paper
         query_prime = self._make_softmax_kernel_features(query)
         key_prime = self._make_softmax_kernel_features(key)
 
@@ -127,11 +160,13 @@ class Performer(nn.Module):
         if attention_mask is not None:
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
-            query_prime, key_prime = self._mask(query_prime, key_prime, valid_attention_mask)
+            assert valid_attention_mask is not None
+            query_prime, key_prime = self._mask(
+                query_prime, key_prime, valid_attention_mask
+            )
         # No need for re-normalization, since normalization factor is computed later
-        
-        return query_prime, key_prime
 
+        return query_prime, key_prime
 
     # Construct random features to estimate softmax
     def _make_softmax_kernel_features(self, mat: Tensor) -> Tensor:
@@ -206,13 +241,15 @@ class Performer(nn.Module):
             for j in range(i):
                 u_j = out[..., j]
                 projs_v_ui += _proj(v, u_j)
-    
+
+        return out
+
     def _get_valid_mask(self, mask: Optional[Tensor]) -> Optional[Tensor]:
         if mask is not None:
             mask = rearrange(mask, "b s -> b 1 1 s")
         return mask
-    
-    def _mask(self, query: Tensor, key: Tensor, mask: Tensor) -> Tensor:
+
+    def _mask(self, query: Tensor, key: Tensor, mask: Tensor) -> Tuple[Tensor, Tensor]:
         return query * mask.transpose(-2, -1), key * mask.transpose(-2, -1)
 
 
@@ -240,71 +277,101 @@ class Nystromformer(nn.Module):
         else:
             self.conv_ = None
 
-
-    def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         assert query.shape == key.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Return vanilla attention matrix
-        if self.num_landmarks == seq_len: 
+        if self.num_landmarks == seq_len:
             return self._compute_vanilla_attn_mat(query, key, attention_mask)
 
         # Return Nystromformer attention matrix
-        F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(query, key, attention_mask)
-        return torch.matmul(F_tilde, torch.matmul(A_tilde, B_tilde)) 
+        F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(
+            query, key, attention_mask
+        )
+        return torch.matmul(F_tilde, torch.matmul(A_tilde, B_tilde))
 
-
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         assert query.shape == key.shape and key.shape == value.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
 
-         # Vanilla attention
+        # Vanilla attention
         if self.num_landmarks == seq_len:
             attention_probs = self._compute_vanilla_attn_mat(query, key, attention_mask)
             out = torch.matmul(attention_probs, value)
         # Nystromformer attention
-        else: 
-            F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(query, key, attention_mask)                     
-            out = torch.matmul( F_tilde, torch.matmul( A_tilde, torch.matmul( B_tilde, value ) ) ) 
+        else:
+            F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(
+                query, key, attention_mask
+            )
+            out = torch.matmul(
+                F_tilde, torch.matmul(A_tilde, torch.matmul(B_tilde, value))
+            )
 
             if self.conv_ is not None:
                 out += self.conv_(value)
 
         return out
 
-
-    def _compute_vanilla_attn_mat(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def _compute_vanilla_attn_mat(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
-        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / sqrt(head_dim) # Compute attention scores
+        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / sqrt(
+            head_dim
+        )  # Compute attention scores
         out = F.softmax(attention_scores, dim=-1)
-        if attention_mask is not None: # Apply mask if needed
+        if attention_mask is not None:  # Apply mask if needed
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
-            out = self._renormalize( self._mask_vanilla_attn(out, valid_attention_mask) )
+            assert valid_attention_mask is not None
+            out = self._renormalize(self._mask_vanilla_attn(out, valid_attention_mask))
 
         return out
-        
-    def _compute_nystrom_factors(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+
+    def _compute_nystrom_factors(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute landmarks for queries, keys
         query_lm = self._compute_landmarks(query)
-        key_lm = self._compute_landmarks(key)                
+        key_lm = self._compute_landmarks(key)
 
         # Compute factors for approx attention
-        F_tilde = F.softmax( torch.matmul(query, key_lm.transpose(-2, -1)) / sqrt(head_dim), dim=-1 )
-        A_tilde = self._iterative_pinv( F.softmax( torch.matmul(query_lm, key_lm.transpose(-2, -1)) / sqrt(head_dim), dim=-1 ) )
-        B_tilde = F.softmax( torch.matmul(query_lm, key.transpose(-2, -1)) / sqrt(head_dim), dim=-1 )  
+        F_tilde = F.softmax(
+            torch.matmul(query, key_lm.transpose(-2, -1)) / sqrt(head_dim), dim=-1
+        )
+        A_tilde = self._iterative_pinv(
+            F.softmax(
+                torch.matmul(query_lm, key_lm.transpose(-2, -1)) / sqrt(head_dim),
+                dim=-1,
+            )
+        )
+        B_tilde = F.softmax(
+            torch.matmul(query_lm, key.transpose(-2, -1)) / sqrt(head_dim), dim=-1
+        )
 
         # Apply mask if needed
         if attention_mask is not None:
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
-            F_tilde, B_tilde = self._mask_nystrom_factors(F_tilde, B_tilde, valid_attention_mask)  
-            
+            assert valid_attention_mask is not None
+            F_tilde, B_tilde = self._mask_nystrom_factors(
+                F_tilde, B_tilde, valid_attention_mask
+            )
+
             F_tilde = self._renormalize(F_tilde)
-            B_tilde = self._renormalize(B_tilde)           
+            B_tilde = self._renormalize(B_tilde)
 
         return F_tilde, A_tilde, B_tilde
 
@@ -341,26 +408,24 @@ class Nystromformer(nn.Module):
 
         return out
 
-
     def _get_valid_mask(self, mask: Optional[Tensor]) -> Optional[Tensor]:
         if mask is not None:
             mask = rearrange(mask, "b s -> b 1 1 s")
         return mask
 
-
     def _mask_vanilla_attn(self, probs: Tensor, mask: Tensor) -> Tensor:
         return mask * probs * mask.transpose(-2, -1)
 
-
-    def _mask_nystrom_factors(self, F: Tensor, B: Tensor, mask: Tensor) -> Tensor:
-        return F * mask.transpose(-2, -1), B * mask # B is already of shape (batch_size, num_heads, num_landmarks, seq_len)
-
+    def _mask_nystrom_factors(
+        self, F: Tensor, B: Tensor, mask: Tensor
+    ) -> Tuple[Tensor, Tensor]:
+        return (
+            F * mask.transpose(-2, -1),
+            B * mask,
+        )  # B is already of shape (batch_size, num_heads, num_landmarks, seq_len)
 
     def _renormalize(self, mat: Tensor):
         return mat / torch.sum(mat, dim=-1, keepdim=True)
-
-
-
 
 
 # Implementation inspired by https://github.com/OpenNLPLab/cosFormer/blob/main/cosformer.py
@@ -369,33 +434,51 @@ class Cosformer(nn.Module):
         super().__init__()
         self.eps = eps  # Tolerance for normalization (to avoid divide-by-zero)
 
-    def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def get_matrix(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tensor:
         assert query.shape == key.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
-        
+
         # Compute feature mapping for Q/K, and normalization factor
         query = query / sqrt(head_dim)
-        query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(query, key, attention_mask) 
-        return torch.matmul(query_cos_sin, key_cos_sin.transpose(-2, -1)) * norm_.unsqueeze(-1)
+        query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(
+            query, key, attention_mask
+        )
+        return torch.matmul(
+            query_cos_sin, key_cos_sin.transpose(-2, -1)
+        ) * norm_.unsqueeze(-1)
 
-    
-    def forward(self, query: Tensor, key: Tensor, value: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor: 
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
         assert query.shape == key.shape and key.shape == value.shape
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute Q, K Cosformer factors
         query = query / sqrt(head_dim)
-        query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(query, key, attention_mask)
-        
+        query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(
+            query, key, attention_mask
+        )
+
         # Compute K^T * V first
-        kv_cos_sin = torch.matmul(key_cos_sin.transpose(-2, -1), value) # (batch_size, num_heads, 2*head_dim, head_dim)
+        kv_cos_sin = torch.matmul(
+            key_cos_sin.transpose(-2, -1), value
+        )  # (batch_size, num_heads, 2*head_dim, head_dim)
 
-         # Compute approximate attention output:
+        # Compute approximate attention output:
         # - Equivalent to torch.matmul(query_cos_sin, kv_cos_sin) * norm_.unsqueeze(-1)
-        return torch.einsum('...hld,...hdm,...hl->...hlm', query_cos_sin, kv_cos_sin, norm_)
+        return torch.einsum(
+            "...hld,...hdm,...hl->...hlm", query_cos_sin, kv_cos_sin, norm_
+        )
 
-
-    def _compute_cosformer_factors(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
+    def _compute_cosformer_factors(
+        self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
+    ) -> Tuple[Tensor, Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Apply relu to queries, keys
@@ -420,20 +503,26 @@ class Cosformer(nn.Module):
         if attention_mask is not None:
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
-            query_cos_sin, key_cos_sin = self._mask(query_cos_sin, key_cos_sin, valid_attention_mask)
+            assert valid_attention_mask is not None
+            query_cos_sin, key_cos_sin = self._mask(
+                query_cos_sin, key_cos_sin, valid_attention_mask
+            )
         # Note: no need to re-normalize rows due to normalization factor being computed below
-        
+
         # Normalization factor:
         # - torch.einsum(): Multiply each row of Q_cos and Q_sin with sums of rows of K_cos and K_sin, resp.
-        # - torch.clamp(): make min at least self.eps for numerical stability  
-        norm_ = 1. / torch.clamp(torch.einsum('...hld,...hd->...hl', query_cos_sin, torch.sum(key_cos_sin, dim=-2)), min=self.eps)
-       
+        # - torch.clamp(): make min at least self.eps for numerical stability
+        norm_ = 1.0 / torch.clamp(
+            torch.einsum(
+                "...hld,...hd->...hl", query_cos_sin, torch.sum(key_cos_sin, dim=-2)
+            ),
+            min=self.eps,
+        )
+
         return query_cos_sin, key_cos_sin, norm_
 
-    
     def _get_idx(self, seq_len):
         return (np.pi / 2) * torch.arange(1, seq_len + 1).reshape(1, 1, -1, 1)
-    
 
     def _get_valid_mask(self, mask: Optional[Tensor]) -> Optional[Tensor]:
         if mask is not None:
@@ -441,6 +530,5 @@ class Cosformer(nn.Module):
         return mask
 
 
-    def _mask(self, query: Tensor, key: Tensor, mask: Tensor) -> Tensor:
-        return query * mask.transpose(-2, -1), key * mask.transpose(-2, -1)
-    
+def _mask(self, query: Tensor, key: Tensor, mask: Tensor) -> Tuple[Tensor, Tensor]:
+    return query * mask.transpose(-2, -1), key * mask.transpose(-2, -1)
