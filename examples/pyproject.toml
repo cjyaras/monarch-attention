@@ -21,6 +21,7 @@ dependencies = [
     "datasets",
     "matplotlib",
     "entmax",
+    "minicons",
     "soba @ file://{root}/../",
 ]
 requires-python = ">=3.10"

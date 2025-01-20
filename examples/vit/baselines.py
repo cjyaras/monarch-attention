@@ -1,5 +1,3 @@
-# TODO: Put the baseline modules here
-
 from math import sqrt
 from typing import Optional
 
@@ -11,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 Tensor = torch.Tensor
+
 
 class Linformer(nn.Module):
     def __init__(self, proj_dim: int, seq_len: int, share_kv: bool = False):
@@ -68,19 +67,22 @@ class Linformer(nn.Module):
     def _renormalize(self, mat: Tensor):
         return mat / torch.sum(mat, dim=-1, keepdim=True)
 
-
-
         
 
 class Performer(nn.Module):
-    def __init__(self, num_samples: int, estimator_type: str = 'pos', ortho_features: bool = True):
+    def __init__(
+        self, num_samples: int, estimator_type: str = "pos", ortho_features: bool = True
+    ):
         super().__init__()
 
-        self.num_samples = num_samples # Number of random features
-        assert estimator_type in ['trig', 'pos', 'hyp-pos'] # Type of feature map to use to estimate softmax attn
+        self.num_samples = num_samples  # Number of random features
+        assert estimator_type in [
+            "trig",
+            "pos",
+            "hyp-pos",
+        ]  # Type of feature map to use to estimate softmax attn
         self.estimator_type = estimator_type
-        self.ortho_features = ortho_features # Flag to use orthogonal features or not
-
+        self.ortho_features = ortho_features  # Flag to use orthogonal features or not
 
     def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
         assert query.shape == key.shape
@@ -132,22 +134,22 @@ class Performer(nn.Module):
 
 
     # Construct random features to estimate softmax
-    def _make_softmax_kernel_features(self, mat: Tensor) -> Tensor:        
-        if self.estimator_type == 'trig':
+    def _make_softmax_kernel_features(self, mat: Tensor) -> Tensor:
+        if self.estimator_type == "trig":
             h_out, f_out = self._trig_softmax_kernel_features(mat)
-        elif self.estimator_type == 'pos':
+        elif self.estimator_type == "pos":
             h_out, f_out = self._pos_softmax_kernel_features(mat)
-        elif self.estimator_type == 'hyp-pos':
+        elif self.estimator_type == "hyp-pos":
             h_out, f_out = self._hyp_pos_softmax_kernel_features(mat)
-        
-        return (1. / sqrt(self.num_samples)) * h_out.unsqueeze(-1) * f_out
-        
+
+        return (1.0 / sqrt(self.num_samples)) * h_out.unsqueeze(-1) * f_out
+
     # cos/sin features
-    def _trig_softmax_kernel_features(self, mat: Tensor) -> (Tensor, Tensor):
+    def _trig_softmax_kernel_features(self, mat: Tensor) -> Tuple[Tensor, Tensor]:
         dim = mat.shape[-1]
 
-        h_out = torch.exp( (torch.linalg.norm(mat, dim=-1)**2) / 2 )
-        
+        h_out = torch.exp((torch.linalg.norm(mat, dim=-1) ** 2) / 2)
+
         omega = self._sample_random_vectors(dim).to(mat.device)
         f1_out = torch.cos(torch.matmul(mat, omega))
         f2_out = torch.sin(torch.matmul(mat, omega))
@@ -155,10 +157,10 @@ class Performer(nn.Module):
         return h_out, torch.cat([f1_out, f2_out], dim=-1)
 
     # Positive features
-    def _pos_softmax_kernel_features(self, mat: Tensor) -> (Tensor, Tensor):
+    def _pos_softmax_kernel_features(self, mat: Tensor) -> Tuple[Tensor, Tensor]:
         dim = mat.shape[-1]
 
-        h_out = torch.exp( -(torch.linalg.norm(mat, dim=-1)**2) / 2 )
+        h_out = torch.exp(-(torch.linalg.norm(mat, dim=-1) ** 2) / 2)
 
         omega = self._sample_random_vectors(dim).to(mat.device)
         f_out = torch.exp(torch.matmul(mat, omega))
@@ -166,31 +168,31 @@ class Performer(nn.Module):
         return h_out, f_out
 
     # Hyperbolic positive features
-    def _hyp_pos_softmax_kernel_features(self, mat: Tensor) -> (Tensor, Tensor):
+    def _hyp_pos_softmax_kernel_features(self, mat: Tensor) -> Tuple[Tensor, Tensor]:
         dim = mat.shape[-1]
 
-        h_out = (1. / sqrt(2)) * torch.exp( -(torch.linalg.norm(mat, dim=-1)**2 ) / 2 )
+        h_out = (1.0 / sqrt(2)) * torch.exp(-(torch.linalg.norm(mat, dim=-1) ** 2) / 2)
 
         omega = self._sample_random_vectors(dim).to(mat.device)
         f1_out = torch.exp(torch.matmul(mat, omega))
         f2_out = torch.exp(torch.matmul(-mat, omega))
 
         return h_out, torch.cat([f1_out, f2_out], dim=-1)
-    
+
     # Generate iid random vectors
     def _sample_random_vectors(self, dim) -> Tensor:
         m = self.num_samples
 
-        if self.ortho_features: # Orthogonal features
-            assert m <= dim 
+        if self.ortho_features:  # Orthogonal features
+            assert m <= dim
             return self._gram_schmidt(torch.randn(dim, m))
-        
-        return torch.randn(dim, m) 
-    
+
+        return torch.randn(dim, m)
+
     # Gram-schmidt process for orthogonalization
     def _gram_schmidt(self, mat):
         def _proj(v, u):
-            return ( (u * v).sum() / (u * u).sum() ) * u
+            return ((u * v).sum() / (u * u).sum()) * u
 
         num_samples = mat.shape[-1]
 
@@ -204,11 +206,6 @@ class Performer(nn.Module):
             for j in range(i):
                 u_j = out[..., j]
                 projs_v_ui += _proj(v, u_j)
-            
-            out[..., i] = v - projs_v_ui
-
-        return out        
-
     
     def _get_valid_mask(self, mask: Optional[Tensor]) -> Optional[Tensor]:
         if mask is not None:
@@ -217,26 +214,31 @@ class Performer(nn.Module):
     
     def _mask(self, query: Tensor, key: Tensor, mask: Tensor) -> Tensor:
         return query * mask.transpose(-2, -1), key * mask.transpose(-2, -1)
-        
 
 
 # Implementation inspired by https://github.com/mlpen/Nystromformer/blob/main/code/attention_nystrom.py
 class Nystromformer(nn.Module):
-    def __init__(self, num_landmarks: int, num_heads: int = None, conv_kernel_size: Optional[int] = None):
+    def __init__(
+        self,
+        num_landmarks: int,
+        num_heads: Optional[int] = None,
+        conv_kernel_size: Optional[int] = None,
+    ):
         super().__init__()
 
-        self.num_landmarks = num_landmarks # 'm' in paper
+        self.num_landmarks = num_landmarks  # 'm' in paper
         if conv_kernel_size is not None:
             assert num_heads is not None
-            self.conv_ = nn.Conv2d(in_channels=num_heads, 
-                                   out_channels=num_heads, 
-                                   kernel_size=conv_kernel_size,
-                                   padding = (conv_kernel_size // 2, 0),
-                                   bias = False,
-                                   groups = num_heads)
+            self.conv_ = nn.Conv2d(
+                in_channels=num_heads,
+                out_channels=num_heads,
+                kernel_size=conv_kernel_size,
+                padding=(conv_kernel_size // 2, 0),
+                bias=False,
+                groups=num_heads,
+            )
         else:
             self.conv_ = None
-
 
 
     def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
@@ -282,7 +284,6 @@ class Nystromformer(nn.Module):
             out = self._renormalize( self._mask_vanilla_attn(out, valid_attention_mask) )
 
         return out
-
         
     def _compute_nystrom_factors(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = query.shape
@@ -307,29 +308,37 @@ class Nystromformer(nn.Module):
 
         return F_tilde, A_tilde, B_tilde
 
-
     def _compute_landmarks(self, mat: Tensor) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = mat.shape
         assert self.num_landmarks < seq_len
 
-        l = seq_len // self.num_landmarks # Truncate last few tokens if not perfectly divisible
-        mat_lm = torch.cat( [ mat[..., j*l:(j+1)*l, :].mean(dim=-2, keepdim=True) for j in range(self.num_landmarks) ], dim=-2 )
+        l = (
+            seq_len // self.num_landmarks
+        )  # Truncate last few tokens if not perfectly divisible
+        mat_lm = torch.cat(
+            [
+                mat[..., j * l : (j + 1) * l, :].mean(dim=-2, keepdim=True)
+                for j in range(self.num_landmarks)
+            ],
+            dim=-2,
+        )
 
         return mat_lm
-        
 
     def _iterative_pinv(self, mat: Tensor, n_iter: int = 6) -> Tensor:
-        I = torch.eye(mat.shape[-1], device = mat.device)
+        I = torch.eye(mat.shape[-1], device=mat.device)
 
-        init_coef = torch.max(torch.sum(torch.abs(mat), dim=-2)) * torch.max(torch.sum(torch.abs(mat), dim=-1))
+        init_coef = torch.max(torch.sum(torch.abs(mat), dim=-2)) * torch.max(
+            torch.sum(torch.abs(mat), dim=-1)
+        )
         out = mat.transpose(-2, -1) / init_coef
 
         for _ in range(n_iter):
-            term1 = 7*I - torch.matmul(mat, out)
-            term2 = 15*I - torch.matmul(mat, torch.matmul(out, term1))
-            term3 = 13*I - torch.matmul(mat, torch.matmul(out, term2))
+            term1 = 7 * I - torch.matmul(mat, out)
+            term2 = 15 * I - torch.matmul(mat, torch.matmul(out, term1))
+            term3 = 13 * I - torch.matmul(mat, torch.matmul(out, term2))
             out = 0.25 * torch.matmul(out, term3)
-        
+
         return out
 
 
@@ -358,8 +367,7 @@ class Nystromformer(nn.Module):
 class Cosformer(nn.Module):
     def __init__(self, eps: Optional[float] = 1e-6):
         super().__init__()
-        self.eps = eps # Tolerance for normalization (to avoid divide-by-zero)
-
+        self.eps = eps  # Tolerance for normalization (to avoid divide-by-zero)
 
     def get_matrix(self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None) -> Tensor:
         assert query.shape == key.shape
@@ -396,8 +404,17 @@ class Cosformer(nn.Module):
 
         # Sin/cos re-weighting
         idx = self._get_idx(seq_len).to(query.device)
-        query_cos_sin = torch.cat( [ query_relu * torch.cos(idx / seq_len), query_relu * torch.sin(idx / seq_len) ], dim=-1 ) # (batch_size, num_heads, seq_len, 2*head_dim)
-        key_cos_sin = torch.cat( [ key_relu * torch.cos(idx / seq_len), key_relu * torch.sin(idx / seq_len) ], dim=-1 )
+        query_cos_sin = torch.cat(
+            [
+                query_relu * torch.cos(idx / seq_len),
+                query_relu * torch.sin(idx / seq_len),
+            ],
+            dim=-1,
+        )  # (batch_size, num_heads, seq_len, 2*head_dim)
+        key_cos_sin = torch.cat(
+            [key_relu * torch.cos(idx / seq_len), key_relu * torch.sin(idx / seq_len)],
+            dim=-1,
+        )
 
         # Apply mask if needed
         if attention_mask is not None:
@@ -412,7 +429,6 @@ class Cosformer(nn.Module):
         norm_ = 1. / torch.clamp(torch.einsum('...hld,...hd->...hl', query_cos_sin, torch.sum(key_cos_sin, dim=-2)), min=self.eps)
        
         return query_cos_sin, key_cos_sin, norm_
-        
 
     
     def _get_idx(self, seq_len):

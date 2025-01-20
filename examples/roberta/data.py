@@ -1,186 +1,101 @@
-from enum import StrEnum
 from typing import Optional
 
 import datasets
-import matplotlib.pyplot as plt
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 from transformers import RobertaTokenizerFast
 
-MAX_LENGTH = 512
+MAX_LENGTH = 384
+DOC_STRIDE = 128
+USE_SQUARE_V2 = True
+MODEL_NAME = "deepset/roberta-base-squad2"
 
 
-class GlueTaskName(StrEnum):
-    cola = "cola"
-    mnli = "mnli"
-    mrpc = "mrpc"
-    qnli = "qnli"
-    qqp = "qqp"
-    rte = "rte"
-    sst2 = "sst2"
-    stsb = "stsb"
-
-
-GLUE_TASK_TO_KEYS = {
-    "cola": ("sentence", None),
-    "mnli": ("premise", "hypothesis"),
-    "mrpc": ("sentence1", "sentence2"),
-    "qnli": ("question", "sentence"),
-    "qqp": ("question1", "question2"),
-    "rte": ("sentence1", "sentence2"),
-    "sst2": ("sentence", None),
-    "stsb": ("sentence1", "sentence2"),
-}
-
-
-def glue_dataset(
-    task_name: GlueTaskName,
-    num_samples: Optional[int] = None,
-    min_length: Optional[int] = None,
-) -> datasets.Dataset:
+def squad_dataloader(batch_size: int = 1, num_samples: Optional[int] = None):
     dataset = datasets.load_dataset(
-        "nyu-mll/glue",
-        task_name,
-        split=(
-            "validation_matched" if task_name == GlueTaskName.mnli else "validation"
-        ),
+        "squad_v2" if USE_SQUARE_V2 else "squad", split="validation"
     )
-    assert isinstance(dataset, datasets.Dataset)
+    tokenizer = RobertaTokenizerFast.from_pretrained(MODEL_NAME)
 
-    tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-    sentence1_key, sentence2_key = GLUE_TASK_TO_KEYS[task_name]
+    pad_on_right = tokenizer.padding_side == "right"
 
-    def length_of(example):
-        texts = (
-            (example[sentence1_key],)
-            if sentence2_key is None
-            else (example[sentence1_key], example[sentence2_key])
+    def preprocess_fn(examples):
+        # Some of the questions have lots of whitespace on the left, which is not useful and will make the
+        # truncation of the context fail (the tokenized question will take a lots of space). So we remove that
+        # left whitespace
+        examples["question"] = [q.lstrip() for q in examples["question"]]
+
+        # Tokenize our examples with truncation and maybe padding, but keep the overflows using a stride. This results
+        # in one example possible giving several features when a context is long, each of those features having a
+        # context that overlaps a bit the context of the previous feature.
+        tokenized_examples = tokenizer(
+            examples["question" if pad_on_right else "context"],
+            examples["context" if pad_on_right else "question"],
+            truncation="only_second" if pad_on_right else "only_first",
+            max_length=MAX_LENGTH,
+            stride=DOC_STRIDE,
+            return_overflowing_tokens=True,
+            return_offsets_mapping=True,
+            padding="max_length",
         )
-        length = len(tokenizer(*texts)["input_ids"])
-        return length
 
-    dataset = dataset.filter(lambda example: length_of(example) <= MAX_LENGTH)
+        # Since one example might give us several features if it has a long context, we need a map from a feature to
+        # its corresponding example. This key gives us just that.
+        sample_mapping = tokenized_examples.pop("overflow_to_sample_mapping")
 
-    if min_length is not None:
-        dataset = dataset.filter(lambda example: length_of(example) >= min_length)
+        # We keep the example_id that gave us this feature and we will store the offset mappings.
+        tokenized_examples["example_id"] = []
+
+        for i in range(len(tokenized_examples["input_ids"])):
+            # Grab the sequence corresponding to that example (to know what is the context and what is the question).
+            sequence_ids = tokenized_examples.sequence_ids(i)
+            context_index = 1 if pad_on_right else 0
+
+            # One example can give several spans, this is the index of the example containing this span of text.
+            sample_index = sample_mapping[i]
+            tokenized_examples["example_id"].append(examples["id"][sample_index])
+
+            # Set to None the offset_mapping that are not part of the context so it's easy to determine if a token
+            # position is part of the context or not.
+            tokenized_examples["offset_mapping"][i] = [
+                (o if sequence_ids[k] == context_index else None)
+                for k, o in enumerate(tokenized_examples["offset_mapping"][i])
+            ]
+
+        return tokenized_examples
+
+    assert isinstance(dataset, datasets.Dataset)
 
     if num_samples is not None:
         dataset = dataset.select(range(num_samples))
 
-    def preprocess_fn(example):
-        texts = (
-            (example[sentence1_key],)
-            if sentence2_key is None
-            else (example[sentence1_key], example[sentence2_key])
-        )
-        result = tokenizer(
-            *texts,
-            padding="max_length",
-            max_length=MAX_LENGTH,
-            truncation=True,
-            return_tensors="pt",
-        )
-        result["labels"] = example["label"]
-        return result
-
-    dataset = dataset.map(preprocess_fn, batched=True, remove_columns=dataset.column_names)  # type: ignore
-    return dataset
-
-
-if __name__ == "__main__":
-
-    task_name = GlueTaskName.stsb
-    sentence1_key, sentence2_key = GLUE_TASK_TO_KEYS[task_name]
-    tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-
-    def length_of(example):
-        texts = (
-            (example[sentence1_key],)
-            if sentence2_key is None
-            else (example[sentence1_key], example[sentence2_key])
-        )
-        length = len(tokenizer(*texts)["input_ids"])
-        return length
-
-    dataset = datasets.load_dataset(
-        "nyu-mll/glue",
-        task_name,
-        split=(
-            "validation_matched" if task_name == GlueTaskName.mnli else "validation"
-        ),
+    dataset = dataset.map(
+        preprocess_fn,
+        batched=True,
+        remove_columns=dataset.column_names,  # type: ignore
     )
-    plt.hist([length_of(example) for example in dataset], bins=50)
-    plt.show()
-
-
-def glue_dataloader(
-    task_name: GlueTaskName,
-    batch_size: int = 1,
-    num_samples: Optional[int] = None,
-    min_length: Optional[int] = None,
-) -> DataLoader:
-
-    dataset = datasets.load_dataset(
-        "nyu-mll/glue",
-        task_name,
-        split=(
-            "validation_matched" if task_name == GlueTaskName.mnli else "validation"
-        ),
-    )
-    assert isinstance(dataset, datasets.Dataset)
-    tokenizer = RobertaTokenizerFast.from_pretrained("roberta-base")
-
-    sentence1_key, sentence2_key = GLUE_TASK_TO_KEYS[task_name]
-
-    def length_of(example):
-        texts = (
-            (example[sentence1_key],)
-            if sentence2_key is None
-            else (example[sentence1_key], example[sentence2_key])
-        )
-        return len(tokenizer(*texts)["input_ids"])  # type: ignore
-
-    dataset = dataset.filter(lambda example: length_of(example) <= MAX_LENGTH)
-
-    if min_length is not None:
-        dataset = dataset.filter(lambda example: length_of(example) >= min_length)
-
-    def preprocess_fn(example):
-        texts = (
-            (example[sentence1_key],)
-            if sentence2_key is None
-            else (example[sentence1_key], example[sentence2_key])
-        )
-        result = tokenizer(
-            *texts,
-            padding="max_length",
-            max_length=MAX_LENGTH,
-            truncation=True,
-            return_tensors="pt",
-        )
-        result["labels"] = example["label"]
-        return result
-
-    if num_samples is not None:
-        dataset = dataset.select(range(num_samples))
-
-    dataset = dataset.map(preprocess_fn, batched=True, remove_columns=dataset.column_names)  # type: ignore
 
     def collate_fn(examples):
+        # TODO: Need to put back the other columns later
         input_ids = torch.stack(
             [torch.tensor(example["input_ids"]) for example in examples], dim=0
         )
         attention_mask = torch.stack(
             [torch.tensor(example["attention_mask"]) for example in examples], dim=0
         )
-        labels = torch.stack(
-            [torch.tensor(example["labels"]) for example in examples], dim=0
-        )
         return {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "labels": labels,
         }
 
     dataloader = DataLoader(dataset, batch_size=batch_size, collate_fn=collate_fn)  # type: ignore
     return dataloader
+
+
+def main():
+    dataloader = squad_dataloader(batch_size=2)
+    print(next(iter(dataloader)))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,10 +1,10 @@
 from enum import StrEnum
 from math import sqrt
-from tokenize import maybe
 from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from baselines import Cosformer, Linformer, Nystromformer, Performer
 from common.utils import maybe_compile
 from entmax import sparsemax
 from torch._prims_common import DeviceLikeType
@@ -16,7 +16,6 @@ from transformers.models.vit.modeling_vit import (
 )
 
 from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA, PadType
-from baselines import Linformer, Performer, Nystromformer, Cosformer
 
 
 class AttentionType(StrEnum):
@@ -43,9 +42,9 @@ class CustomViTConfig(ViTConfig):
         efficient_attention_block_size: Optional[int] = None,
         efficient_attention_pad_type: PadType = PadType.pre,
         share_kv: bool = False,
-        estimator_type: str = 'pos',
-        ortho_features: bool = True, 
-        conv_kernel_size: int = None,
+        estimator_type: str = "pos",
+        ortho_features: bool = True,
+        conv_kernel_size: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -74,8 +73,6 @@ class CustomViTConfig(ViTConfig):
         # Cosformer: none
 
 
-
-
 def get_config() -> CustomViTConfig:
     config = CustomViTConfig.from_pretrained("google/vit-base-patch16-224")
     assert isinstance(config, CustomViTConfig)
@@ -88,10 +85,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
         super().__init__(config)
         self.attention_type = config.attention_type
 
-        if self.attention_type in [
-            AttentionType.softmax,
-            AttentionType.sparsemax
-        ]:
+        if self.attention_type in [AttentionType.softmax, AttentionType.sparsemax]:
             pass
 
         elif self.attention_type in [
@@ -137,53 +131,55 @@ class CustomViTSelfAttention(ViTSelfAttention):
             maybe_compile(self.efficient_attn)
 
         elif self.attention_type in [
-            AttentionType.linformer, 
+            AttentionType.linformer,
             AttentionType.performer,
             AttentionType.nystromformer,
-            AttentionType.cosformer
+            AttentionType.cosformer,
         ]:
-            assert isinstance(config.image_size, int) and isinstance(config.patch_size, int)
-            seq_len = (config.image_size // config.patch_size)**2 + 1 # TODO: cleaner way to get sequence length here?
+            assert isinstance(config.image_size, int) and isinstance(
+                config.patch_size, int
+            )
+            seq_len = (
+                config.image_size // config.patch_size
+            ) ** 2 + 1  # TODO: cleaner way to get sequence length here?
 
             if self.attention_type == AttentionType.linformer:
                 proj_dim = config.efficient_attention_rank
                 share_kv = config.share_kv
+                assert proj_dim is not None
                 self.efficient_attn = Linformer(
-                    proj_dim=proj_dim,
-                    seq_len=seq_len,
-                    share_kv=share_kv
+                    proj_dim=proj_dim, seq_len=seq_len, share_kv=share_kv
                 )
-            
+
             elif self.attention_type == AttentionType.performer:
                 num_samples = config.efficient_attention_rank
                 estimator_type = config.estimator_type
                 ortho_features = config.ortho_features
+                assert num_samples is not None
                 self.efficient_attn = Performer(
                     num_samples=num_samples,
                     estimator_type=estimator_type,
-                    ortho_features=ortho_features
+                    ortho_features=ortho_features,
                 )
-            
+
             elif self.attention_type == AttentionType.nystromformer:
                 num_landmarks = config.efficient_attention_rank
                 conv_kernel_size = config.conv_kernel_size
                 num_heads = config.num_attention_heads
+                assert num_landmarks is not None
                 self.efficient_attn = Nystromformer(
                     num_landmarks=num_landmarks,
                     num_heads=num_heads,
-                    conv_kernel_size=conv_kernel_size
+                    conv_kernel_size=conv_kernel_size,
                 )
 
             elif self.attention_type == AttentionType.cosformer:
                 self.efficient_attn = Cosformer()
-                
 
             maybe_compile(self.efficient_attn)
-        
-        else:
-                raise ValueError(f"Invalid attention type: {self.attention_type}")
 
-        
+        else:
+            raise ValueError(f"Invalid attention type: {self.attention_type}")
 
         if config.scale_attention_temperature:
             self.register_buffer(
@@ -237,7 +233,6 @@ class CustomViTSelfAttention(ViTSelfAttention):
             assert isinstance(attention_probs, torch.Tensor)
             context_layer = torch.matmul(attention_probs, value_layer)
 
-        # TODO: Add baselines forward logic here
         else:
             context_layer = self.efficient_attn(query_layer, key_layer, value_layer)
 
