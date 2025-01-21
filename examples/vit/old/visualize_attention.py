@@ -3,11 +3,11 @@ from math import sqrt
 import matplotlib.pyplot as plt
 import torch
 from common.utils import get_device, move
-from data import imagenet_dataloader
+from data import get_dataset
 from entmax import sparsemax
-from models import get_config, get_model
-from utils import extract_qk
 
+from examples.vit.model import get_config, get_model
+from examples.vit.old.utils import extract_qk
 from sobalib.layers import MonarchMHA, PadType
 
 LAYER = 0

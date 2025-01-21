@@ -1,7 +1,8 @@
 from typing import Dict, List, Tuple
 
 import torch
-from models import CustomViTForImageClassification
+
+from examples.vit.model import CustomViTForImageClassification
 
 Tensor = torch.Tensor
 from math import inf, sqrt
@@ -13,7 +14,7 @@ from tqdm import tqdm
 
 def _register_qk_hook(
     model: CustomViTForImageClassification,
-    all_layer_intermediates: List[Dict[str, Tensor]],
+    all_layer_intermediates: List[Dict[str, List[Tensor]]],
 ):
     layers = model.vit.encoder.layer
 
@@ -22,16 +23,16 @@ def _register_qk_hook(
 
         def query_hook(_layer_idx):
             def hook(module, input, output):
-                all_layer_intermediates[_layer_idx].update(
-                    {"query": attn_layer.transpose_for_scores(output)}
+                all_layer_intermediates[_layer_idx]["query"].append(
+                    attn_layer.transpose_for_scores(output)
                 )
 
             return hook
 
         def key_hook(_layer_idx):
             def hook(module, input, output):
-                all_layer_intermediates[_layer_idx].update(
-                    {"key": attn_layer.transpose_for_scores(output)}
+                all_layer_intermediates[_layer_idx]["key"].append(
+                    attn_layer.transpose_for_scores(output)
                 )
 
             return hook
