@@ -3,6 +3,7 @@ from typing import Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from common.baselines import Cosformer, Linformer, Nystromformer, Performer
 from common.utils import maybe_compile
 from config import AttentionType, CustomViTConfig
 from entmax import sparsemax
@@ -12,7 +13,6 @@ from transformers.models.vit.modeling_vit import (
     ViTSelfAttention,
 )
 
-from examples.common.baselines import Cosformer, Linformer, Nystromformer, Performer
 from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA
 
 
@@ -153,7 +153,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
                 query_layer,
                 key_layer,
                 value_layer,
-                head_mask,
+                None,
                 0.0,
                 is_causal=False,
                 scale=None,

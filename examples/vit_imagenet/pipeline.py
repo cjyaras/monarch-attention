@@ -21,12 +21,16 @@ PIPELINE_REGISTRY.register_pipeline(
 )
 
 
-def get_pipeline(config: CustomViTConfig) -> CustomImageClassificationPipeline:
+def get_pipeline(
+    config: CustomViTConfig,
+    batch_size: int = 1,
+) -> CustomImageClassificationPipeline:
     pipe = pipeline(
         "custom-image-classification",
         model=get_model(config),
         device=get_device(),
         image_processor=get_processor(),
+        batch_size=batch_size,
     )
     assert isinstance(pipe, CustomImageClassificationPipeline)
     return pipe

@@ -2,11 +2,9 @@ from typing import Dict, List, Tuple
 
 import torch
 from common.data import IterableKeyDataset
-from common.utils import get_device
-from config import get_config
-from data import get_dataset
+from config import CustomViTConfig
 from datasets import IterableDataset
-from model import CustomViTConfig, CustomViTForImageClassification, get_model
+from model import CustomViTForImageClassification
 from pipeline import get_pipeline
 from tqdm import tqdm
 

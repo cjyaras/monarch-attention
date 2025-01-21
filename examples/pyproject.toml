@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["vit", "roberta", "common"]
+packages = ["common"]
 
 [tool.hatch.metadata]
 allow-direct-references = true
@@ -21,7 +21,6 @@ dependencies = [
     "datasets",
     "matplotlib",
     "entmax",
-    "minicons",
     "soba @ file://{root}/../",
 ]
 requires-python = ">=3.10"
