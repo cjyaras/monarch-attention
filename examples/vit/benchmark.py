@@ -1,12 +1,12 @@
 import torch
-from config import AttentionType, get_config
-from eval import Evaluator
-from model import prepare_args
+from vit.config import AttentionType, get_config
+from vit.evaluation import Evaluator
+from vit.model import prepare_args
 
 NUM_SAMPLES = 128
 TOP_K = 5
 BATCH_SIZE = 4
-SAVE_DIR = "vit_imagenet/results"
+SAVE_DIR = "vit/results"
 
 
 @torch.no_grad()

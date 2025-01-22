@@ -12,6 +12,14 @@ dependencies = [
     "torch",
     "opt_einsum",
     "einops",
+    "torchvision",
+    "torchtnt",
+    "transformers",
+    "evaluate",
+    "scikit-learn",
+    "datasets",
+    "matplotlib",
+    "entmax",
 ]
 requires-python = ">=3.10"
 authors = [

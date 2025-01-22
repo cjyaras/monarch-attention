@@ -3,11 +3,11 @@ from typing import Dict, Optional
 import torch
 from common.data import dataset_from_iterable
 from common.logging import Logger
-from config import CustomViTConfig
-from data import get_dataset
 from evaluate import ImageClassificationEvaluator
-from metric import TopKAccuracy
-from pipeline import get_pipeline
+from vit.config import CustomViTConfig
+from vit.data import get_dataset
+from vit.metric import TopKAccuracy
+from vit.pipeline import get_pipeline
 
 
 class CustomImageClassificationEvaluator(ImageClassificationEvaluator):

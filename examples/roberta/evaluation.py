@@ -2,10 +2,10 @@ from typing import Dict, Optional
 
 import torch
 from common.logging import Logger
-from config import CustomRobertaConfig
-from data import get_dataset
 from evaluate import QuestionAnsweringEvaluator
-from pipeline import get_pipeline
+from roberta.config import CustomRobertaConfig
+from roberta.data import get_dataset
+from roberta.pipeline import get_pipeline
 
 
 class CustomQuestionAnsweringEvaluator(QuestionAnsweringEvaluator):

@@ -10,13 +10,13 @@ from common.baselines import (
     Sparsemax,
 )
 from common.utils import maybe_compile
-from config import AttentionType, CustomViTConfig
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
     ViTModel,
     ViTSelfAttention,
 )
 from transformers.utils.logging import ERROR, set_verbosity
+from vit.config import AttentionType, CustomViTConfig
 
 from sobalib.layers import SobaMonarch
 
@@ -135,7 +135,7 @@ def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
     )
     if config.scale_attention_temperature:
         model.load_state_dict(
-            torch.load("vit_imagenet/sparsemax_temperature.pt", weights_only=True),
+            torch.load("vit/sparsemax_temperature.pt", weights_only=True),
             strict=False,
         )
     model.eval()

@@ -3,7 +3,7 @@ from typing import Optional, Tuple
 import torch
 from common.baselines import Softmax, Sparsemax
 from common.utils import maybe_compile
-from config import AttentionType, CustomRobertaConfig
+from roberta.config import AttentionType, CustomRobertaConfig
 from transformers.models.roberta.modeling_roberta import (
     RobertaAttention,
     RobertaForMaskedLM,
@@ -12,8 +12,11 @@ from transformers.models.roberta.modeling_roberta import (
     RobertaModel,
     RobertaSelfAttention,
 )
+from transformers.utils.logging import ERROR, set_verbosity
 
 from sobalib.layers import SobaMonarch
+
+set_verbosity(ERROR)
 
 Tensor = torch.Tensor
 
@@ -200,7 +203,7 @@ def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
     )
     if config.scale_attention_temperature:
         model.load_state_dict(
-            torch.load("roberta_squad/sparsemax_temperature.pt", weights_only=True),
+            torch.load("roberta/sparsemax_temperature.pt", weights_only=True),
             strict=False,
         )
     model.eval()

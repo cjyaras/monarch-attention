@@ -1,9 +1,9 @@
 from typing import Optional, Union
 
 from common.utils import get_device
-from config import CustomRobertaConfig
-from model import CustomRobertaForQuestionAnswering, get_model
-from processor import get_processor
+from roberta.config import CustomRobertaConfig
+from roberta.model import CustomRobertaForQuestionAnswering, get_model
+from roberta.processor import get_processor
 from transformers import ModelCard, PreTrainedTokenizer, pipeline
 from transformers.pipelines import PIPELINE_REGISTRY
 from transformers.pipelines.question_answering import (

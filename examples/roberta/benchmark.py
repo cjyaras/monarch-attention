@@ -1,11 +1,11 @@
 import torch
-from config import AttentionType, get_config
-from eval import Evaluator
-from model import prepare_args
+from roberta.config import AttentionType, get_config
+from roberta.evaluation import Evaluator
+from roberta.model import prepare_args
 
 NUM_SAMPLES = 128
 BATCH_SIZE = 4
-SAVE_DIR = "roberta_squad/results"
+SAVE_DIR = "roberta/results"
 
 
 @torch.no_grad()
@@ -33,7 +33,7 @@ def main():
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
-    exit()
+    return
 
     # Monarch
     config = get_config()
