@@ -2,12 +2,11 @@ from math import inf, sqrt
 from typing import List
 
 import torch
+from common.baselines import Softmax, Sparsemax
 from common.utils import get_device
 from config import get_config
 from data import get_dataset
-from entmax import sparsemax
 from extract import extract_query_key
-from torch.nn.functional import softmax
 from tqdm.auto import tqdm
 
 Tensor = torch.Tensor
@@ -29,28 +28,33 @@ def calibrate_sparsemax_temperature(
     returns: [num_layers, num_heads]
     """
     num_layers, num_heads, seq_len, dim_per_head = query_list[0].shape
+    search_size = len(attention_temperature_vals)
     differences = torch.zeros(
-        num_layers,
-        num_heads,
-        len(attention_temperature_vals),
+        search_size,
+        num_layers * num_heads,
         device=query_list[0].device,
     )
 
+    softmax = Softmax()
+    sparsemax = Sparsemax()
+
     for i in tqdm(range(len(query_list))):
-        query = query_list[i]
-        key = key_list[i]
-        attn_weights = query @ key.transpose(-1, -2) / sqrt(dim_per_head)
-        softmax_attn_weights = softmax(attn_weights, dim=-1)[..., None, :, :]
-        sparsemax_attn_weights = sparsemax(
-            attn_weights[..., None, :, :] / attention_temperature_vals[:, None, None]
+        query = query_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
+        key = key_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
+        softmax_attn_probs = softmax.get_matrix(query, key)
+        sparsemax_attn_probs = sparsemax.get_matrix(
+            query / attention_temperature_vals[:, None, None, None],
+            key / torch.ones_like(attention_temperature_vals[:, None, None, None]),
         )
         attn_weights_diff = torch.flatten(
-            softmax_attn_weights - sparsemax_attn_weights, start_dim=-2
+            softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
         )
         differences += torch.linalg.norm(attn_weights_diff, ord=inf, dim=-1)
 
-    optimal_temperature_idx = differences.min(dim=-1)[1]
-    optimal_temperature = attention_temperature_vals[optimal_temperature_idx]
+    optimal_temperature_idx = differences.min(dim=0)[1]
+    optimal_temperature = attention_temperature_vals[
+        optimal_temperature_idx.reshape(num_layers, num_heads)
+    ]
     return optimal_temperature
 
 
@@ -60,12 +64,10 @@ def main():
     device = get_device()
     dataset = get_dataset(num_samples=NUM_SAMPLES)
 
-    all_query, all_key = extract_query_key(config, dataset)
+    all_query, all_key = extract_query_key(config, dataset, batch_size=4)
 
     optimal_temperature = calibrate_sparsemax_temperature(
-        all_query,
-        all_key,
-        torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device),
+        all_query, all_key, torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device)
     )
 
     torch.save(
@@ -75,7 +77,7 @@ def main():
             ]
             for i in range(len(optimal_temperature))
         },
-        "vit/sparsemax_temperature_2.pt",
+        "vit_imagenet/sparsemax_temperature_2.pt",
     )
 
 

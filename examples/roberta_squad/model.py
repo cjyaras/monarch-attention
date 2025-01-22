@@ -1,13 +1,9 @@
-from math import sqrt
 from typing import Optional, Tuple
 
 import torch
+from common.baselines import Softmax, Sparsemax
 from common.utils import maybe_compile
 from config import AttentionType, CustomRobertaConfig
-from entmax import sparsemax
-from torch import nn
-from torch._prims_common import DeviceLikeType
-from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
 from transformers.models.roberta.modeling_roberta import (
     RobertaAttention,
     RobertaForMaskedLM,
@@ -17,9 +13,38 @@ from transformers.models.roberta.modeling_roberta import (
     RobertaSelfAttention,
 )
 
-from sobalib.layers import LowRankMHA, MonarchBlockDiagonalMHA, MonarchMHA
+from sobalib.layers import SobaMonarch
 
 Tensor = torch.Tensor
+
+ATTENTION_TYPE_TO_MODULE = {
+    AttentionType.softmax: Softmax,
+    AttentionType.sparsemax: Sparsemax,
+    AttentionType.soba_monarch: SobaMonarch,
+}
+
+
+def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
+
+    if config.attention_type == AttentionType.softmax:
+        return (config.enable_flash_attention,)
+
+    elif config.attention_type == AttentionType.sparsemax:
+        return ()
+
+    elif config.attention_type == AttentionType.soba_monarch:
+        return (config.block_size, config.num_steps, config.step_size, config.pad_type)
+
+    elif config.attention_type == AttentionType.hybrid:
+        assert config.hybrid_attention_layers is not None
+        return (
+            (config.block_size, config.num_steps, config.step_size, config.pad_type)
+            if layer_num in config.hybrid_attention_layers
+            else ()
+        )
+
+    else:
+        raise ValueError(f"Invalid attention type: {config.attention_type}")
 
 
 class CustomRobertaSelfAttention(RobertaSelfAttention):
@@ -30,76 +55,20 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         assert self.position_embedding_type == "absolute"
         assert not self.is_decoder
 
-        self.attention_type = config.attention_type
-
-        if self.attention_type in [AttentionType.softmax, AttentionType.sparsemax]:
-            self.efficient_attn = None
-
-        elif self.attention_type in [
-            AttentionType.low_rank,
-            AttentionType.monarch,
-            AttentionType.monarch_block_diagonal,
-        ]:
-            num_steps = config.efficient_attention_num_steps
-            step_size = config.efficient_attention_step_size
-            assert num_steps is not None and step_size is not None
-
-            if self.attention_type == AttentionType.low_rank:
-                rank = config.efficient_attention_rank
-                assert rank is not None
-                self.efficient_attn = LowRankMHA(
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    rank=rank,
+        if config.attention_type == AttentionType.hybrid:
+            assert config.hybrid_attention_layers is not None
+            module = ATTENTION_TYPE_TO_MODULE[
+                (
+                    AttentionType.soba_monarch
+                    if layer_num in config.hybrid_attention_layers
+                    else AttentionType.sparsemax
                 )
+            ]
+        else:
+            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
 
-            elif self.attention_type == AttentionType.monarch:
-                block_size = config.efficient_attention_block_size
-                pad_type = config.efficient_attention_pad_type
-                assert block_size is not None and pad_type is not None
-                self.efficient_attn = MonarchMHA(
-                    block_size=block_size,
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    pad_type=pad_type,
-                )
-
-            elif self.attention_type == AttentionType.monarch_block_diagonal:
-                block_size = config.efficient_attention_block_size
-                pad_type = config.efficient_attention_pad_type
-                assert block_size is not None and pad_type is not None
-                self.efficient_attn = MonarchBlockDiagonalMHA(
-                    block_size=block_size,
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    pad_type=pad_type,
-                )
-
-            else:
-                raise ValueError(f"Invalid attention type: {self.attention_type}")
-
-        elif self.attention_type == AttentionType.hybrid:
-            num_steps = config.efficient_attention_num_steps
-            step_size = config.efficient_attention_step_size
-            assert num_steps is not None and step_size is not None
-            block_size = config.efficient_attention_block_size
-            pad_type = config.efficient_attention_pad_type
-            hybrid_layers = config.hybrid_attention_layers
-            assert (
-                block_size is not None
-                and pad_type is not None
-                and hybrid_layers is not None
-            )
-
-            if layer_num in hybrid_layers:
-                self.efficient_attn = MonarchMHA(
-                    block_size=block_size,
-                    num_steps=num_steps,
-                    step_size=step_size,
-                    pad_type=pad_type,
-                )
-            else:
-                self.efficient_attn = None
+        self.attn_module = module(*prepare_args(config, layer_num))
+        maybe_compile(self.attn_module)
 
         if config.scale_attention_temperature:
             self.register_buffer(
@@ -109,11 +78,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
             )
         else:
             self.attention_temperature = None
-
-        if self.efficient_attn is not None:
-            maybe_compile(self.efficient_attn)
-
-        self.enable_flash_attention = config.enable_flash_attention
 
     # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
     def load_state_dict(self, state_dict, **kwargs):
@@ -134,6 +98,8 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         output_attentions: Optional[bool] = False,
     ) -> Tuple[Tensor]:
 
+        # print(attention_mask.shape)
+
         assert head_mask is None
         assert encoder_hidden_states is None
         assert encoder_attention_mask is None
@@ -151,58 +117,9 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         if self.attention_temperature is not None:
             query_layer = query_layer / self.attention_temperature[..., None, None]
 
-        if self.attention_type == AttentionType.softmax and self.enable_flash_attention:
-            extended_attention_mask = (
-                _prepare_4d_attention_mask_for_sdpa(
-                    attention_mask, dtype=query_layer.dtype
-                )
-                if attention_mask is not None
-                else None
-            )
-            context_layer = torch.nn.functional.scaled_dot_product_attention(
-                query_layer,
-                key_layer,
-                value_layer,
-                extended_attention_mask,
-                0.0,
-                is_causal=False,
-                scale=None,
-            )
-
-        elif self.attention_type in [
-            AttentionType.softmax,
-            AttentionType.sparsemax,
-        ] or (
-            self.attention_type == AttentionType.hybrid and self.efficient_attn is None
-        ):
-            extended_attention_mask = (
-                (
-                    (1.0 - attention_mask[:, None, None, :])
-                    * torch.finfo(query_layer.dtype).min
-                )
-                if attention_mask is not None
-                else None
-            )
-            attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
-            attention_scores = attention_scores / sqrt(self.attention_head_size)
-            if extended_attention_mask is not None:
-                attention_scores = attention_scores + extended_attention_mask
-            attention_probs = (
-                sparsemax(attention_scores, dim=-1)
-                if (
-                    self.attention_type == AttentionType.sparsemax
-                    or self.attention_type == AttentionType.hybrid
-                )
-                else nn.functional.softmax(attention_scores, dim=-1)
-            )
-            assert isinstance(attention_probs, Tensor)
-            context_layer = torch.matmul(attention_probs, value_layer)
-
-        else:
-            assert self.efficient_attn is not None
-            context_layer = self.efficient_attn(
-                query_layer, key_layer, value_layer, attention_mask
-            )
+        context_layer = self.attn_module(
+            query_layer, key_layer, value_layer, attention_mask
+        )
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -254,7 +171,6 @@ class CustomRobertaModel(RobertaModel):
     def get_extended_attention_mask(
         self, attention_mask: Tensor, input_shape: Tuple[int]
     ) -> Tensor:
-
         assert not self.config.is_decoder
         return attention_mask  # Delegate the exact computation to the attention layer
 
@@ -286,7 +202,7 @@ def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
     )
     if config.scale_attention_temperature:
         model.load_state_dict(
-            torch.load("roberta/sparsemax_temperature.pt", weights_only=True),
+            torch.load("roberta_squad/sparsemax_temperature.pt", weights_only=True),
             strict=False,
         )
     model.eval()

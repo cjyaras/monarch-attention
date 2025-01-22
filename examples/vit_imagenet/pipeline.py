@@ -9,6 +9,7 @@ from transformers.utils.import_utils import requires_backends
 
 
 class CustomImageClassificationPipeline(ImageClassificationPipeline):
+
     def __init__(self, *args, **kwargs):
         super(ImageClassificationPipeline, self).__init__(*args, **kwargs)
         requires_backends(self, "vision")

@@ -14,6 +14,8 @@ def generate_random_file_name(extension="json"):
 class Logger:
     def __init__(self, save_folder: str):
         self.save_folder = save_folder
+        if not os.path.exists(self.save_folder):
+            os.makedirs(self.save_folder)
 
     def save(self, config: PretrainedConfig, result: Dict[str, float]) -> str:
         file_name = generate_random_file_name()

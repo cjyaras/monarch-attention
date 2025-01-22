@@ -1,12 +1,13 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
-from common.data import IterableKeyDataset
+from common.data import dataset_from_iterable
 from config import CustomViTConfig
-from datasets import IterableDataset
+from data import get_dataset
+from eval import CustomImageClassificationEvaluator
+from metric import TopKAccuracy
 from model import CustomViTForImageClassification
 from pipeline import get_pipeline
-from tqdm import tqdm
 
 Tensor = torch.Tensor
 
@@ -42,18 +43,28 @@ def _register_qk_hook(
 
 @torch.no_grad()
 def extract_query_key(
-    config: CustomViTConfig, dataset: IterableDataset
+    config: CustomViTConfig,
+    num_samples: Optional[int] = None,
+    batch_size: int = 1,
 ) -> Tuple[List[Tensor], List[Tensor]]:
 
-    pipe = get_pipeline(config)
+    dataset = dataset_from_iterable(get_dataset(num_samples=num_samples))
+    evaluator = CustomImageClassificationEvaluator(top_k=1)
+    metric = TopKAccuracy()
 
-    all_layer_intermediates = [{"query": [], "key": []} for _ in range(12)]
+    pipe = get_pipeline(config, batch_size=batch_size)
+
+    all_layer_intermediates = [
+        {"query": [], "key": []} for _ in range(config.num_hidden_layers)
+    ]
     _register_qk_hook(pipe.model, all_layer_intermediates)
 
-    result = pipe(IterableKeyDataset(dataset, "image"))  # type: ignore
-    assert result is not None
-
-    [_ for _ in tqdm(result)]
+    evaluator.compute(
+        model_or_pipeline=pipe,
+        data=dataset,
+        metric=metric,
+        label_mapping=pipe.model.config.label2id,  # type: ignore
+    )
 
     query = list(
         torch.unbind(

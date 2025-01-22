@@ -3,14 +3,14 @@ from typing import Dict, Optional
 import torch
 from common.data import dataset_from_iterable
 from common.logging import Logger
-from config import AttentionType, CustomViTConfig, get_config
+from config import CustomViTConfig
 from data import get_dataset
 from evaluate import ImageClassificationEvaluator
 from metric import TopKAccuracy
 from pipeline import get_pipeline
 
 
-class TopKImageClassificationEvaluator(ImageClassificationEvaluator):
+class CustomImageClassificationEvaluator(ImageClassificationEvaluator):
 
     def __init__(self, top_k: int):
         super().__init__(task="custom-image-classification", default_metric_name="")
@@ -28,12 +28,14 @@ class TopKImageClassificationEvaluator(ImageClassificationEvaluator):
 
 
 def create_evaluate_fn(
-    num_samples: Optional[int] = None, batch_size: int = 1, top_k: int = 5
+    num_samples: Optional[int] = None,
+    batch_size: int = 1,
+    top_k: int = 5,
 ):
     from torchtnt.utils.flops import FlopTensorDispatchMode
 
     dataset = dataset_from_iterable(get_dataset(num_samples=num_samples))
-    evaluator = TopKImageClassificationEvaluator(top_k=top_k)
+    evaluator = CustomImageClassificationEvaluator(top_k=top_k)
     metric = TopKAccuracy()
 
     @torch.no_grad()
@@ -51,7 +53,7 @@ def create_evaluate_fn(
             result["total_attention_bmm_flops"] = sum(
                 [
                     ftdm.flop_counts[f"vit.encoder.layer.{i}.attention"]["bmm.default"]
-                    for i in range(12)
+                    for i in range(config.num_hidden_layers)
                 ]
             )
         return result

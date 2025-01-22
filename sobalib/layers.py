@@ -41,7 +41,7 @@ def _safe_inv_norm(x: Tensor, dim: int) -> Tensor:
     return torch.where(norms > 0, 1 / norms, 0.0)
 
 
-class LowRankMHA(nn.Module):
+class SobaLowRank(nn.Module):
 
     def __init__(self, rank: int, num_steps: int, step_size: float):
         super().__init__()
@@ -164,7 +164,7 @@ class PadType(StrEnum):
     post = "post"
 
 
-class MonarchMHA(nn.Module):
+class SobaMonarch(nn.Module):
 
     def __init__(
         self,
@@ -417,7 +417,7 @@ class MonarchMHA(nn.Module):
         return left, right
 
 
-class MonarchBlockDiagonalMHA(nn.Module):
+class SobaMonarchBlockDiagonal(nn.Module):
 
     def __init__(
         self,
