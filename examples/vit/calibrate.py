@@ -9,7 +9,7 @@ from vit.extract import extract_query_key
 
 Tensor = torch.Tensor
 
-NUM_SAMPLES = 4  # 128
+NUM_SAMPLES = 128
 BATCH_SIZE = 4
 SEARCH_RANGE = (1.0, 50.0)
 SEARCH_STEPS = 50
@@ -71,17 +71,15 @@ def main():
         all_query, all_key, torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device)
     )
 
-    print(optimal_temperature)
-
-    # torch.save(
-    #     {
-    #         f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
-    #             i
-    #         ]
-    #         for i in range(len(optimal_temperature))
-    #     },
-    #     "vit/sparsemax_temperature.pt",
-    # )
+    torch.save(
+        {
+            f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
+                i
+            ]
+            for i in range(len(optimal_temperature))
+        },
+        "vit/sparsemax_temperature.pt",
+    )
 
 
 if __name__ == "__main__":
