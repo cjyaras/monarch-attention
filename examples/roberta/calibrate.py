@@ -47,15 +47,26 @@ def calibrate_sparsemax_temperature(
         key = key_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
         attention_mask = attention_mask_vals[i].reshape(1, seq_len)
         softmax_attn_probs = softmax.get_matrix(query, key)
-        sparsemax_attn_probs = sparsemax.get_matrix(
-            query / attention_temperature_vals[:, None, None, None],
-            key / torch.ones_like(attention_temperature_vals[:, None, None, None]),
-            attention_mask / torch.ones_like(attention_temperature_vals[:, None]),
-        )
-        attn_weights_diff = torch.flatten(
-            softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
-        )
-        differences += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=-1)
+
+        # Process each temperature separately
+        for j, temperature in enumerate(attention_temperature_vals):
+            sparsemax_attn_probs = sparsemax.get_matrix(
+                query / temperature, key / torch.ones_like(temperature), attention_mask
+            )
+            attn_weights_diff = torch.flatten(
+                softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
+            )
+            differences[j] += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=(0, -1))
+
+        # sparsemax_attn_probs = sparsemax.get_matrix(
+        #     query / attention_temperature_vals[:, None, None, None],
+        #     key / torch.ones_like(attention_temperature_vals[:, None, None, None]),
+        #     attention_mask / torch.ones_like(attention_temperature_vals[:, None]),
+        # )
+        # attn_weights_diff = torch.flatten(
+        #     softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
+        # )
+        # differences += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=-1)
 
     optimal_temperature_idx = differences.min(dim=0)[1]
     optimal_temperature = attention_temperature_vals[

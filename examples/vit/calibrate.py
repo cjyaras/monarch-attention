@@ -9,7 +9,7 @@ from vit.extract import extract_query_key
 
 Tensor = torch.Tensor
 
-NUM_SAMPLES = 128
+NUM_SAMPLES = 4  # 128
 BATCH_SIZE = 4
 SEARCH_RANGE = (1.0, 50.0)
 SEARCH_STEPS = 50
@@ -42,14 +42,16 @@ def calibrate_sparsemax_temperature(
         query = query_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
         key = key_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
         softmax_attn_probs = softmax.get_matrix(query, key)
-        sparsemax_attn_probs = sparsemax.get_matrix(
-            query / attention_temperature_vals[:, None, None, None],
-            key / torch.ones_like(attention_temperature_vals[:, None, None, None]),
-        )
-        attn_weights_diff = torch.flatten(
-            softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
-        )
-        differences += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=-1)
+
+        # Process each temperature separately
+        for j, temperature in enumerate(attention_temperature_vals):
+            sparsemax_attn_probs = sparsemax.get_matrix(
+                query / temperature, key / torch.ones_like(temperature)
+            )
+            attn_weights_diff = torch.flatten(
+                softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
+            )
+            differences[j] += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=(0, -1))
 
     optimal_temperature_idx = differences.min(dim=0)[1]
     optimal_temperature = attention_temperature_vals[
@@ -69,15 +71,17 @@ def main():
         all_query, all_key, torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device)
     )
 
-    torch.save(
-        {
-            f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
-                i
-            ]
-            for i in range(len(optimal_temperature))
-        },
-        "vit/sparsemax_temperature.pt",
-    )
+    print(optimal_temperature)
+
+    # torch.save(
+    #     {
+    #         f"vit.encoder.layer.{i}.attention.attention.attention_temperature": optimal_temperature[
+    #             i
+    #         ]
+    #         for i in range(len(optimal_temperature))
+    #     },
+    #     "vit/sparsemax_temperature.pt",
+    # )
 
 
 if __name__ == "__main__":
