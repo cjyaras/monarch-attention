@@ -25,7 +25,7 @@ requires-python = ">=3.10"
 authors = [
   {name = "Can Yaras", email = "cjyaras@gmail.com"},
 ]
-description = "Stuctured Optimal Bi-directional Attention."
+description = "Stucture-Optimal Bidirectional Attention."
 readme = "README.md"
 license = {file = "LICENSE"}
 keywords = []

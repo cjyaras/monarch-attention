@@ -9,7 +9,6 @@ Requires `python>=3.10`. How to run ViT example:
 ```
 python -m venv .venv
 source .venv/bin/activate
-cd examples
 pip install .
-python vit/examples.py
+python -m vit.benchmark.py
 ```
