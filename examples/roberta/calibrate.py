@@ -9,7 +9,7 @@ from tqdm.auto import tqdm
 
 Tensor = torch.Tensor
 
-NUM_SAMPLES = 128
+NUM_SAMPLES = 16
 BATCH_SIZE = 4
 SEARCH_RANGE = (1.0, 50.0)
 SEARCH_STEPS = 50
