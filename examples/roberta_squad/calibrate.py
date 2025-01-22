@@ -12,8 +12,9 @@ Tensor = torch.Tensor
 
 NUM_SAMPLES = 128
 BATCH_SIZE = 4
-SEARCH_RANGE = (1.0, 20.0)
-SEARCH_STEPS = 10
+SEARCH_RANGE = (1.0, 50.0)
+SEARCH_STEPS = 50
+ORD = 2
 
 
 @torch.no_grad()
@@ -55,7 +56,7 @@ def calibrate_sparsemax_temperature(
         attn_weights_diff = torch.flatten(
             softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
         )
-        differences += torch.linalg.norm(attn_weights_diff, ord=inf, dim=-1)
+        differences += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=-1)
 
     optimal_temperature_idx = differences.min(dim=0)[1]
     optimal_temperature = attention_temperature_vals[

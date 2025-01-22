@@ -35,7 +35,7 @@ def main():
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
-    exit()
+    return
 
     # Monarch
     config = get_config()

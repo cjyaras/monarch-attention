@@ -16,8 +16,11 @@ from transformers.models.vit.modeling_vit import (
     ViTModel,
     ViTSelfAttention,
 )
+from transformers.utils.logging import ERROR, set_verbosity
 
 from sobalib.layers import SobaMonarch
+
+set_verbosity(ERROR)
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
