@@ -35,6 +35,8 @@ def calibrate_sparsemax_temperature(
         device=query_list[0].device,
     )
 
+    assert search_size % BATCH_SIZE == 0
+
     softmax = Softmax()
     sparsemax = Sparsemax()
 
@@ -43,15 +45,21 @@ def calibrate_sparsemax_temperature(
         key = key_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
         softmax_attn_probs = softmax.get_matrix(query, key)
 
-        # Process each temperature separately
-        for j, temperature in enumerate(attention_temperature_vals):
+        for j in range(0, search_size, BATCH_SIZE):
             sparsemax_attn_probs = sparsemax.get_matrix(
-                query / temperature, key / torch.ones_like(temperature)
+                query
+                / attention_temperature_vals[j : j + BATCH_SIZE, None, None, None],
+                key
+                / torch.ones_like(
+                    attention_temperature_vals[j : j + BATCH_SIZE, None, None, None]
+                ),
             )
             attn_weights_diff = torch.flatten(
                 softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
             )
-            differences[j] += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=(0, -1))
+            differences[j : j + BATCH_SIZE] += torch.linalg.norm(
+                attn_weights_diff, ord=ORD, dim=-1
+            )
 
     optimal_temperature_idx = differences.min(dim=0)[1]
     optimal_temperature = attention_temperature_vals[

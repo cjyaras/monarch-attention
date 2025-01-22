@@ -12,7 +12,7 @@ Tensor = torch.Tensor
 NUM_SAMPLES = 16
 BATCH_SIZE = 4
 SEARCH_RANGE = (1.0, 50.0)
-SEARCH_STEPS = 50
+SEARCH_STEPS = 64
 ORD = 2
 
 
@@ -39,6 +39,8 @@ def calibrate_sparsemax_temperature(
         device=query_list[0].device,
     )
 
+    assert search_size % BATCH_SIZE == 0
+
     softmax = Softmax()
     sparsemax = Sparsemax()
 
@@ -48,15 +50,31 @@ def calibrate_sparsemax_temperature(
         attention_mask = attention_mask_vals[i].reshape(1, seq_len)
         softmax_attn_probs = softmax.get_matrix(query, key)
 
-        # Process each temperature separately
-        for j, temperature in enumerate(attention_temperature_vals):
+        for j in range(0, search_size, BATCH_SIZE):
             sparsemax_attn_probs = sparsemax.get_matrix(
-                query / temperature, key / torch.ones_like(temperature), attention_mask
+                query
+                / attention_temperature_vals[j : j + BATCH_SIZE, None, None, None],
+                key
+                / torch.ones_like(
+                    attention_temperature_vals[j : j + BATCH_SIZE, None, None, None]
+                ),
+                attention_mask
+                / torch.ones_like(attention_temperature_vals[j : j + BATCH_SIZE, None]),
             )
             attn_weights_diff = torch.flatten(
                 softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
             )
-            differences[j] += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=(0, -1))
+            differences[j : j + BATCH_SIZE] += torch.linalg.norm(
+                attn_weights_diff, ord=ORD, dim=-1
+            )
+            # for j, temperature in enumerate(attention_temperature_vals):
+            # sparsemax_attn_probs = sparsemax.get_matrix(
+            #     query / temperature, key / torch.ones_like(temperature), attention_mask
+            # )
+            # attn_weights_diff = torch.flatten(
+            #     softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
+            # )
+            # differences[j] += torch.linalg.norm(attn_weights_diff, ord=ORD, dim=(0, -1))
 
         # sparsemax_attn_probs = sparsemax.get_matrix(
         #     query / attention_temperature_vals[:, None, None, None],
