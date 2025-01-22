@@ -1,3 +1,6 @@
+# Pytorch save files
+.pt
+
 # Pickle files
 *.pkl
 *.npy

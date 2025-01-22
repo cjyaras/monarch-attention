@@ -73,7 +73,10 @@ class Evaluator:
         )
         self.logger = Logger(save_dir)
 
+    def evaluate(self, config: CustomViTConfig) -> Dict[str, float]:
+        return self.evaluate_fn(config)
+
     def evaluate_and_save(self, config: CustomViTConfig) -> str:
-        result = self.evaluate_fn(config)
+        result = self.evaluate(config)
         file_name = self.logger.save(config, result)
         return file_name

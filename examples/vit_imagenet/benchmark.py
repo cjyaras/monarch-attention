@@ -24,14 +24,18 @@ def main():
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
     print(config.attention_type, prepare_args(config))
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
 
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
     config.scale_attention_temperature = True
     print(config.attention_type, prepare_args(config))
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
+
+    exit()
 
     # Monarch
     config = get_config()

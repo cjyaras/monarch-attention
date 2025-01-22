@@ -19,26 +19,17 @@ def _register_qk_hook(
     layers = model.vit.encoder.layer
 
     for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.attention
+        attn_layer = layers[layer_idx].attention.attention.attn_module
 
-        def query_hook(_layer_idx):
+        def qk_hook(_layer_idx):
             def hook(module, input, output):
-                all_layer_intermediates[_layer_idx]["query"].append(
-                    attn_layer.transpose_for_scores(output)
-                )
+                query, key, _ = input
+                all_layer_intermediates[_layer_idx]["query"].append(query)
+                all_layer_intermediates[_layer_idx]["key"].append(key)
 
             return hook
 
-        def key_hook(_layer_idx):
-            def hook(module, input, output):
-                all_layer_intermediates[_layer_idx]["key"].append(
-                    attn_layer.transpose_for_scores(output)
-                )
-
-            return hook
-
-        attn_layer.query.register_forward_hook(query_hook(layer_idx))
-        attn_layer.key.register_forward_hook(key_hook(layer_idx))
+        attn_layer.register_forward_hook(qk_hook(layer_idx))
 
 
 @torch.no_grad()

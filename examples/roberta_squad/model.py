@@ -98,8 +98,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         output_attentions: Optional[bool] = False,
     ) -> Tuple[Tensor]:
 
-        # print(attention_mask.shape)
-
         assert head_mask is None
         assert encoder_hidden_states is None
         assert encoder_attention_mask is None

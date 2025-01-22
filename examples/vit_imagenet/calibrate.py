@@ -1,17 +1,17 @@
-from math import inf, sqrt
+from math import inf
 from typing import List
 
 import torch
 from common.baselines import Softmax, Sparsemax
 from common.utils import get_device
 from config import get_config
-from data import get_dataset
 from extract import extract_query_key
 from tqdm.auto import tqdm
 
 Tensor = torch.Tensor
 
 NUM_SAMPLES = 128
+BATCH_SIZE = 4
 SEARCH_RANGE = (1.0, 20.0)
 SEARCH_STEPS = 10
 
@@ -62,9 +62,8 @@ def calibrate_sparsemax_temperature(
 def main():
     config = get_config()
     device = get_device()
-    dataset = get_dataset(num_samples=NUM_SAMPLES)
 
-    all_query, all_key = extract_query_key(config, dataset, batch_size=4)
+    all_query, all_key = extract_query_key(config, NUM_SAMPLES, batch_size=BATCH_SIZE)
 
     optimal_temperature = calibrate_sparsemax_temperature(
         all_query, all_key, torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device)
@@ -77,7 +76,7 @@ def main():
             ]
             for i in range(len(optimal_temperature))
         },
-        "vit_imagenet/sparsemax_temperature_2.pt",
+        "vit_imagenet/sparsemax_temperature.pt",
     )
 
 

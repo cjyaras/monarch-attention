@@ -11,9 +11,7 @@ from pipeline import get_pipeline
 class CustomQuestionAnsweringEvaluator(QuestionAnsweringEvaluator):
 
     def __init__(self):
-        super().__init__(
-            task="custom-question-answering", default_metric_name="squad_v2"
-        )
+        super().__init__(task="custom-question-answering")
         self.PIPELINE_KWARGS["padding"] = "max_length"
 
 
@@ -31,6 +29,7 @@ def create_evaluate_fn(num_samples: Optional[int] = None, batch_size: int = 1):
             result = evaluator.compute(
                 model_or_pipeline=pipe,
                 data=dataset,
+                metric="squad_v2",
                 squad_v2_format=True,
             )
             assert isinstance(result, Dict)
@@ -58,7 +57,10 @@ class Evaluator:
         )
         self.logger = Logger(save_dir)
 
+    def evaluate(self, config: CustomRobertaConfig) -> Dict[str, float]:
+        return self.evaluate_fn(config)
+
     def evaluate_and_save(self, config: CustomRobertaConfig) -> str:
-        result = self.evaluate_fn(config)
+        result = self.evaluate(config)
         file_name = self.logger.save(config, result)
         return file_name
