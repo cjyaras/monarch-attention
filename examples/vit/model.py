@@ -1,6 +1,7 @@
 from typing import Optional, Tuple, Union
 
 import torch
+import torch.nn as nn
 from common.baselines import (
     Cosformer,
     Linformer,
@@ -71,10 +72,9 @@ class CustomViTSelfAttention(ViTSelfAttention):
         maybe_compile(self.attn_module)
 
         if config.scale_attention_temperature:
-            self.register_buffer(
+            self.register_parameter(
                 "attention_temperature",
-                torch.full((self.num_attention_heads,), 1.0),
-                persistent=True,
+                nn.Parameter(torch.full((self.num_attention_heads,), 0.0)),
             )
         else:
             self.attention_temperature = None
@@ -96,7 +96,9 @@ class CustomViTSelfAttention(ViTSelfAttention):
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
         if self.attention_temperature is not None:
-            query_layer = query_layer / self.attention_temperature[..., None, None]
+            query_layer = query_layer * torch.exp(
+                self.attention_temperature[..., None, None]
+            )
 
         context_layer = self.attn_module(query_layer, key_layer, value_layer)
 
@@ -133,10 +135,10 @@ def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
     model = CustomViTForImageClassification.from_pretrained(
         "google/vit-base-patch16-224", config=config
     )
-    if config.scale_attention_temperature:
-        model.load_state_dict(
-            torch.load("vit/sparsemax_temperature.pt", weights_only=True),
-            strict=False,
-        )
+    # if config.scale_attention_temperature:
+    #     model.load_state_dict(
+    #         torch.load("vit/sparsemax_temperature.pt", weights_only=True),
+    #         strict=False,
+    #     )
     model.eval()
     return model

@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from einops import rearrange
 from torch._prims_common import DeviceLikeType
-from torch.distributions import Dirichlet
 from torch.nn.functional import pad
 
 Tensor = torch.Tensor
@@ -23,8 +22,6 @@ def _simplex_init(
         return center + noise
     else:
         return center * torch.ones(shape, device=device)
-    # else:
-    #     return Dirichlet(torch.tensor([1.0] * shape[-1])).sample(shape[:-1])
 
 
 def _project(x: Tensor, u: Tensor) -> Tensor:

@@ -34,10 +34,8 @@ def _register_qk_hook(
 
 @torch.no_grad()
 def extract_query_key(
-    config: CustomViTConfig,
-    num_samples: Optional[int] = None,
-    batch_size: int = 1,
-) -> Tuple[List[Tensor], List[Tensor]]:
+    config: CustomViTConfig, num_samples: Optional[int] = None, batch_size: int = 1
+) -> Tuple[Tensor, Tensor]:
 
     dataset = dataset_from_iterable(get_dataset(num_samples=num_samples))
     evaluator = CustomImageClassificationEvaluator(top_k=1)
@@ -57,26 +55,33 @@ def extract_query_key(
         label_mapping=pipe.model.config.label2id,  # type: ignore
     )
 
-    query = list(
-        torch.unbind(
-            torch.stack(
-                [
-                    torch.cat(layer_intermediates["query"])
-                    for layer_intermediates in all_layer_intermediates
-                ]
-            ).transpose(1, 0)
-        )
-    )
+    query = torch.stack(
+        [
+            torch.cat(layer_intermediates["query"])
+            for layer_intermediates in all_layer_intermediates
+        ]
+    ).transpose(1, 0)
 
-    key = list(
-        torch.unbind(
-            torch.stack(
-                [
-                    torch.cat(layer_intermediates["key"])
-                    for layer_intermediates in all_layer_intermediates
-                ]
-            ).transpose(1, 0)
-        )
-    )
+    key = torch.stack(
+        [
+            torch.cat(layer_intermediates["key"])
+            for layer_intermediates in all_layer_intermediates
+        ]
+    ).transpose(1, 0)
 
     return query, key
+
+
+@torch.no_grad()
+def main():
+    import numpy as np
+    from vit.config import get_config
+
+    config = get_config()
+    query, key = extract_query_key(config, num_samples=128, batch_size=4)
+    np.save("vit/query.npy", query.cpu().numpy())
+    np.save("vit/key.npy", key.cpu().numpy())
+
+
+if __name__ == "__main__":
+    main()
