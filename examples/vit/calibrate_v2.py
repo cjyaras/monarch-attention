@@ -4,7 +4,6 @@ from typing import Dict, Optional
 import matplotlib.pyplot as plt
 import torch
 from common.baselines import Softmax, Sparsemax
-from common.utils import get_device
 from tqdm.auto import tqdm
 from vit.config import AttentionType, get_config
 from vit.extract import extract_query_key
@@ -18,7 +17,6 @@ def calibrate_layerwise(
     step_size: float, num_steps: int, num_samples: Optional[int] = None
 ):
     config = get_config()
-    device = get_device()
     all_query, all_key = extract_query_key(config, num_samples=num_samples)
 
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
@@ -34,7 +32,7 @@ def calibrate_layerwise(
         key = key_per_layer[i]
 
         attention_temperature_per_layer = torch.zeros(
-            config.num_attention_heads, device=device
+            config.num_attention_heads, device=query.device
         )
         attention_temperature_per_layer.requires_grad = True
 
@@ -71,6 +69,7 @@ def calibrate_logits(
     init_attention_temperature: Optional[Dict[str, Tensor]] = None,
     num_samples: Optional[int] = None,
 ):
+
     # Load softmax model
     config = get_config()
     softmax_model = get_model(config)

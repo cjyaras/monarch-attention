@@ -1,4 +1,4 @@
-from typing import TypeVar
+from typing import Dict, List, TypeVar
 
 import torch
 import torch.nn as nn
@@ -8,6 +8,17 @@ from torch._prims_common import DeviceLikeType
 T = TypeVar("T")
 
 Tensor = torch.Tensor
+
+
+def move(obj: T, device: DeviceLikeType) -> T:
+    if isinstance(obj, Tensor):
+        return obj.to(device)  # type: ignore
+    elif isinstance(obj, List):
+        return [move(v, device) for v in obj]  # type: ignore
+    elif isinstance(obj, Dict):
+        return {k: move(v, device) for k, v in obj.items()}  # type: ignore
+    else:
+        raise ValueError(f"Unsupported type: {type(obj)}")
 
 
 def get_device() -> DeviceLikeType:

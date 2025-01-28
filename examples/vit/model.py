@@ -10,7 +10,7 @@ from common.baselines import (
     Softmax,
     Sparsemax,
 )
-from common.utils import maybe_compile
+from common.utils import get_device, maybe_compile
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
     ViTModel,
@@ -132,13 +132,15 @@ class CustomViTForImageClassification(ViTForImageClassification):
 
 
 def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
+    device = get_device()
     model = CustomViTForImageClassification.from_pretrained(
         "google/vit-base-patch16-224", config=config
     )
+    model = model.to(device)  # type: ignore
+    model.eval()
+    return model
     # if config.scale_attention_temperature:
     #     model.load_state_dict(
     #         torch.load("vit/sparsemax_temperature.pt", weights_only=True),
     #         strict=False,
     #     )
-    model.eval()
-    return model
