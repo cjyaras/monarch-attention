@@ -8,16 +8,16 @@ from vit.processor import get_processor
 
 
 def get_preprocessed_dataset(num_samples: Optional[int] = None):
-    device = get_device()
     dataset = dataset_from_iterable(get_dataset(num_samples))
     processor = get_processor()
+    device = get_device()
 
     def transform(example_batch):
         inputs = processor(
             [x.convert("RGB") for x in example_batch["image"]], return_tensors="pt"
         )
         inputs["labels"] = torch.tensor(example_batch["label"])
-        return move(inputs, device)
+        return inputs.to(device)
 
     preprocessed_dataset = dataset.with_transform(transform)
     return preprocessed_dataset
