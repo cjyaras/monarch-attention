@@ -36,7 +36,13 @@ def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
         return ()
 
     elif config.attention_type == AttentionType.soba_monarch:
-        return (config.block_size, config.num_steps, config.step_size, config.pad_type)
+        return (
+            config.block_size,
+            config.num_steps,
+            config.step_size,
+            config.num_attention_heads,
+            config.pad_type,
+        )
 
     elif config.attention_type == AttentionType.hybrid:
         assert config.hybrid_attention_layers is not None

@@ -3,7 +3,7 @@ from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
 from vit.model import prepare_args
 
-NUM_SAMPLES = 128
+NUM_SAMPLES = 32
 TOP_K = 5
 BATCH_SIZE = 4
 SAVE_DIR = "vit/results"
@@ -31,6 +31,7 @@ def main():
     config = get_config()
     config.attention_type = AttentionType.sparsemax
     config.scale_attention_temperature = True
+    config.attention_temperature_path = "vit/attention_temperature_2.pt"
     print(config.attention_type, prepare_args(config))
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
@@ -41,11 +42,14 @@ def main():
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
     config.scale_attention_temperature = True
-    config.num_steps = 3
-    config.step_size = 2.5
+    config.num_steps = 10
+    config.step_size = 0.02
     config.block_size = 14
     print(config.attention_type, prepare_args(config))
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
+
+    return
 
     # Linformer
     config = get_config()

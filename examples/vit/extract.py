@@ -1,7 +1,6 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
-from common.data import dataset_from_iterable
 from vit.config import CustomViTConfig
 from vit.data import get_dataset
 from vit.evaluation import CustomImageClassificationEvaluator
@@ -37,7 +36,7 @@ def extract_query_key(
     config: CustomViTConfig, num_samples: Optional[int] = None, batch_size: int = 1
 ) -> Tuple[Tensor, Tensor]:
 
-    dataset = dataset_from_iterable(get_dataset(num_samples=num_samples))
+    dataset = get_dataset(num_samples=num_samples)
     evaluator = CustomImageClassificationEvaluator(top_k=1)
     metric = TopKAccuracy()
 
@@ -75,9 +74,13 @@ def extract_query_key(
 @torch.no_grad()
 def main():
     import numpy as np
-    from vit.config import get_config
+    from vit.config import AttentionType, get_config
 
     config = get_config()
+    config.attention_type = AttentionType.sparsemax
+    config.scale_attention_temperature = True
+    config.attention_temperature_path = "vit/attention_temperature_2.pt"
+
     query, key = extract_query_key(config, num_samples=128, batch_size=4)
     np.save("vit/query.npy", query.cpu().numpy())
     np.save("vit/key.npy", key.cpu().numpy())

@@ -43,7 +43,13 @@ def prepare_args(config: CustomViTConfig) -> Tuple:
         return ()
 
     elif config.attention_type == AttentionType.soba_monarch:
-        return (config.block_size, config.num_steps, config.step_size, config.pad_type)
+        return (
+            config.block_size,
+            config.num_steps,
+            config.init_step_size,
+            config.num_attention_heads,
+            config.pad_type,
+        )
 
     elif config.attention_type == AttentionType.linformer:
         return (config.rank, config.seq_len, config.share_kv)
@@ -74,7 +80,7 @@ class CustomViTSelfAttention(ViTSelfAttention):
         if config.scale_attention_temperature:
             self.register_parameter(
                 "attention_temperature",
-                nn.Parameter(torch.full((self.num_attention_heads,), 0.0)),
+                nn.Parameter(torch.zeros((self.num_attention_heads,))),
             )
         else:
             self.attention_temperature = None
@@ -138,9 +144,12 @@ def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
     )
     model = model.to(device)  # type: ignore
     model.eval()
+    if (
+        config.scale_attention_temperature
+        and config.attention_temperature_path is not None
+    ):
+        model.load_state_dict(
+            torch.load(config.attention_temperature_path, weights_only=True),
+            strict=False,
+        )
     return model
-    # if config.scale_attention_temperature:
-    #     model.load_state_dict(
-    #         torch.load("vit/sparsemax_temperature.pt", weights_only=True),
-    #         strict=False,
-    #     )
