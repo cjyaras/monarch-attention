@@ -30,8 +30,7 @@ def main():
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
-    config.scale_attention_temperature = True
-    config.attention_temperature_path = "vit/attention_temperature_2.pt"
+    config.log_attention_scale_path = "vit/sparsemax_layerwise_log_attention_scale.pt"
     print(config.attention_type, prepare_args(config))
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
@@ -41,9 +40,9 @@ def main():
     # Monarch
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
-    config.scale_attention_temperature = True
-    config.num_steps = 10
-    config.step_size = 0.02
+    config.log_attention_scale_path = "vit/soba_layerwise_log_attention_scale.pt"
+    config.log_step_size_path = "vit/soba_layerwise_log_step_size.pt"
+    config.num_steps = 3
     config.block_size = 14
     print(config.attention_type, prepare_args(config))
     print(evaluator.evaluate(config))

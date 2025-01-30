@@ -93,6 +93,13 @@ class Softmax(nn.Module):
 
 class Sparsemax(nn.Module):
 
+    def __init__(self, num_heads: int):
+        super().__init__()
+        self.register_parameter(
+            "log_attention_scale",
+            nn.Parameter(torch.zeros((num_heads,))),
+        )
+
     def get_matrix(
         self,
         query: Tensor,
@@ -110,8 +117,12 @@ class Sparsemax(nn.Module):
             if attention_mask is not None
             else None
         )
+
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / sqrt(head_dim)
+        attention_scores = attention_scores * torch.exp(
+            self.log_attention_scale[..., None, None]
+        )
 
         if attention_mask is not None:
             attention_scores = attention_scores + attention_mask
@@ -138,8 +149,12 @@ class Sparsemax(nn.Module):
             if attention_mask is not None
             else None
         )
+
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
         attention_scores = attention_scores / sqrt(head_dim)
+        attention_scores = attention_scores * torch.exp(
+            self.log_attention_scale[..., None, None]
+        )
 
         if attention_mask is not None:
             attention_scores = attention_scores + attention_mask

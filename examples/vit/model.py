@@ -1,7 +1,6 @@
 from typing import Optional, Tuple, Union
 
 import torch
-import torch.nn as nn
 from common.baselines import (
     Cosformer,
     Linformer,
@@ -40,13 +39,12 @@ def prepare_args(config: CustomViTConfig) -> Tuple:
         return (config.enable_flash_attention,)
 
     elif config.attention_type == AttentionType.sparsemax:
-        return ()
+        return (config.num_attention_heads,)
 
     elif config.attention_type == AttentionType.soba_monarch:
         return (
             config.block_size,
             config.num_steps,
-            config.init_step_size,
             config.num_attention_heads,
             config.pad_type,
         )
@@ -77,14 +75,6 @@ class CustomViTSelfAttention(ViTSelfAttention):
 
         maybe_compile(self.attn_module)
 
-        if config.scale_attention_temperature:
-            self.register_parameter(
-                "attention_temperature",
-                nn.Parameter(torch.zeros((self.num_attention_heads,))),
-            )
-        else:
-            self.attention_temperature = None
-
     def forward(
         self,
         hidden_states: torch.FloatTensor,
@@ -100,11 +90,6 @@ class CustomViTSelfAttention(ViTSelfAttention):
         key_layer = self.transpose_for_scores(self.key(hidden_states))
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        if self.attention_temperature is not None:
-            query_layer = query_layer * torch.exp(
-                self.attention_temperature[..., None, None]
-            )
 
         context_layer = self.attn_module(query_layer, key_layer, value_layer)
 
@@ -144,12 +129,23 @@ def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
     )
     model = model.to(device)  # type: ignore
     model.eval()
+
     if (
-        config.scale_attention_temperature
-        and config.attention_temperature_path is not None
+        config.attention_type in [AttentionType.sparsemax, AttentionType.soba_monarch]
+        and config.log_attention_scale_path is not None
     ):
         model.load_state_dict(
-            torch.load(config.attention_temperature_path, weights_only=True),
+            torch.load(config.log_attention_scale_path, weights_only=True),
             strict=False,
         )
+
+    if (
+        config.attention_type == AttentionType.soba_monarch
+        and config.log_step_size_path is not None
+    ):
+        model.load_state_dict(
+            torch.load(config.log_step_size_path, weights_only=True),
+            strict=False,
+        )
+
     return model

@@ -21,10 +21,9 @@ class CustomViTConfig(ViTConfig):
         self,
         attention_type: AttentionType = AttentionType.softmax,
         enable_flash_attention: bool = False,
-        scale_attention_temperature: bool = False,
-        attention_temperature_path: Optional[str] = None,
+        log_attention_scale_path: Optional[str] = None,
+        log_step_size_path: Optional[str] = None,
         num_steps: Optional[int] = None,
-        init_step_size: Optional[float] = None,
         rank: Optional[int] = None,
         block_size: Optional[int] = None,
         pad_type: PadType = PadType.pre,
@@ -41,14 +40,13 @@ class CustomViTConfig(ViTConfig):
         self.enable_flash_attention = enable_flash_attention
 
         # Sparsemax
-        self.scale_attention_temperature = scale_attention_temperature
-        self.attention_temperature_path = attention_temperature_path
+        self.log_attention_scale_path = log_attention_scale_path
 
         # SobaMonarch
         self.num_steps = num_steps
-        self.init_step_size = init_step_size
         self.block_size = block_size
         self.pad_type = pad_type
+        self.log_step_size_path = log_step_size_path
 
         # Linformer
         # self.rank used as projection dim

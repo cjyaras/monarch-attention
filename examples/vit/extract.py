@@ -69,22 +69,3 @@ def extract_query_key(
     ).transpose(1, 0)
 
     return query, key
-
-
-@torch.no_grad()
-def main():
-    import numpy as np
-    from vit.config import AttentionType, get_config
-
-    config = get_config()
-    config.attention_type = AttentionType.sparsemax
-    config.scale_attention_temperature = True
-    config.attention_temperature_path = "vit/attention_temperature_2.pt"
-
-    query, key = extract_query_key(config, num_samples=128, batch_size=4)
-    np.save("vit/query.npy", query.cpu().numpy())
-    np.save("vit/key.npy", key.cpu().numpy())
-
-
-if __name__ == "__main__":
-    main()
