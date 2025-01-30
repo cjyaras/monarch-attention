@@ -299,6 +299,8 @@ def calibrate_soba():
         num_samples=16,
         batch_size=4,
     )
+    torch.save(log_attention_scale, "vit/soba_logits_log_attention_scale.pt")
+    torch.save(log_step_size, "vit/soba_logits_log_step_size.pt")
 
 
 def main():
