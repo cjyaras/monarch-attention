@@ -1,9 +1,10 @@
 import torch
+
 from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
 from vit.model import prepare_args
 
-NUM_SAMPLES = 32
+NUM_SAMPLES = 128
 TOP_K = 5
 BATCH_SIZE = 4
 SAVE_DIR = "vit/results"
@@ -11,7 +12,6 @@ SAVE_DIR = "vit/results"
 
 @torch.no_grad()
 def main():
-
     evaluator = Evaluator(
         num_samples=NUM_SAMPLES,
         top_k=TOP_K,
@@ -30,18 +30,17 @@ def main():
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
-    config.log_attention_scale_path = "vit/sparsemax_layerwise_log_attention_scale.pt"
+    config.attn_module_save_path = "vit/sparsemax_params_layerwise.pt"
     print(config.attention_type, prepare_args(config))
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
-    return
+    # return
 
     # Monarch
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
-    config.log_attention_scale_path = "vit/soba_layerwise_log_attention_scale.pt"
-    config.log_step_size_path = "vit/soba_layerwise_log_step_size.pt"
+    config.attn_module_save_path = "vit/soba_params_layerwise.pt"
     config.num_steps = 3
     config.block_size = 14
     print(config.attention_type, prepare_args(config))

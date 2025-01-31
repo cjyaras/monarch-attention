@@ -1,6 +1,13 @@
 from typing import Optional, Tuple, Union
 
 import torch
+from transformers.models.vit.modeling_vit import (
+    ViTForImageClassification,
+    ViTModel,
+    ViTSelfAttention,
+)
+from transformers.utils.logging import ERROR, set_verbosity
+
 from common.baselines import (
     Cosformer,
     Linformer,
@@ -9,16 +16,9 @@ from common.baselines import (
     Softmax,
     Sparsemax,
 )
+from common.soba import SobaMonarch
 from common.utils import get_device, maybe_compile
-from transformers.models.vit.modeling_vit import (
-    ViTForImageClassification,
-    ViTModel,
-    ViTSelfAttention,
-)
-from transformers.utils.logging import ERROR, set_verbosity
 from vit.config import AttentionType, CustomViTConfig
-
-from sobalib.layers import SobaMonarch
 
 set_verbosity(ERROR)
 
@@ -110,7 +110,7 @@ class CustomViTModel(ViTModel):
     ):
         super().__init__(config, add_pooling_layer, use_mask_token)
         for layer in self.encoder.layer:
-            layer.attention.attention = CustomViTSelfAttention(config)
+            layer.attention.attention = CustomViTSelfAttention(config)  # type: ignore
         self.post_init()
 
 
@@ -130,22 +130,9 @@ def get_model(config: CustomViTConfig) -> CustomViTForImageClassification:
     model = model.to(device)  # type: ignore
     model.eval()
 
-    if (
-        config.attention_type in [AttentionType.sparsemax, AttentionType.soba_monarch]
-        and config.log_attention_scale_path is not None
-    ):
+    if config.attn_module_save_path is not None:
         model.load_state_dict(
-            torch.load(config.log_attention_scale_path, weights_only=True),
-            strict=False,
-        )
-
-    if (
-        config.attention_type == AttentionType.soba_monarch
-        and config.log_step_size_path is not None
-    ):
-        model.load_state_dict(
-            torch.load(config.log_step_size_path, weights_only=True),
-            strict=False,
+            torch.load(config.attn_module_save_path, weights_only=True), strict=False
         )
 
     return model

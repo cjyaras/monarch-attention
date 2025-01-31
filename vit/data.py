@@ -10,8 +10,8 @@ from vit.processor import get_processor
 def get_dataset(num_samples: Optional[int] = None) -> Dataset:
     dataset = load_dataset("imagenet-1k", split="validation", streaming=True)
     assert isinstance(dataset, IterableDataset)
+    dataset = dataset.take(num_samples) if num_samples is not None else dataset
     dataset = dataset_from_iterable(dataset)
-    dataset = dataset.select(range(num_samples)) if num_samples is not None else dataset
     return dataset
 
 

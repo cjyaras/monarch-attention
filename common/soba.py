@@ -5,23 +5,9 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 from einops import rearrange
-from torch._prims_common import DeviceLikeType
 from torch.nn.functional import pad
 
 Tensor = torch.Tensor
-
-
-def _simplex_init(
-    shape: Tuple[int, ...],
-    perturb_scale: Optional[float] = None,
-    device: Optional[DeviceLikeType] = None,
-) -> Tensor:
-    center = 1 / sqrt(shape[-1])
-    if perturb_scale is not None:
-        noise = 2 * perturb_scale * torch.rand(shape, device=device) - perturb_scale
-        return center + noise
-    else:
-        return center * torch.ones(shape, device=device)
 
 
 def _project(x: Tensor, u: Tensor) -> Tensor:
@@ -36,137 +22,6 @@ def _safe_normalize(x: Tensor, dim: int) -> Tensor:
 def _safe_inv_norm(x: Tensor, dim: int) -> Tensor:
     norms = torch.linalg.norm(x, dim=dim, keepdims=True)
     return torch.where(norms > 0, 1 / norms, 0.0)
-
-
-# class SobaLowRank(nn.Module):
-
-#     def __init__(
-#         self,
-#         rank: int,
-#         num_steps: int,
-#         init_step_size: float,
-#         num_heads: int,
-#         perturb_scale: float = 1e-3,
-#     ):
-#         super().__init__()
-#         self.rank = rank
-#         self.num_steps = num_steps
-#         self.perturb_scale = perturb_scale
-
-#         self.register_parameter(
-#             "step_size", nn.Parameter(torch.full((num_heads,), init_step_size))
-#         )
-
-#     def get_matrix(
-#         self,
-#         query: Tensor,
-#         key: Tensor,
-#         attention_mask: Optional[Tensor] = None,
-#     ) -> Tensor:
-#         assert query.shape == key.shape
-#         batch_size, num_heads, seq_len, head_dim = query.shape
-#         if attention_mask is not None:
-#             assert attention_mask.shape == (batch_size, seq_len)
-
-#         query = query / sqrt(head_dim)
-#         valid_mask = self._get_valid_mask(attention_mask)
-#         left, right = self._get_factors(query, key, valid_mask)
-#         return self._get_matrix_from_factors(left, right)
-
-#     def forward(
-#         self,
-#         query: Tensor,
-#         key: Tensor,
-#         value: Tensor,
-#         attention_mask: Optional[Tensor] = None,
-#     ) -> Tensor:
-#         assert query.shape == key.shape and key.shape == value.shape
-#         batch_size, num_heads, seq_len, head_dim = query.shape
-#         if attention_mask is not None:
-#             assert attention_mask.shape == (batch_size, seq_len)
-
-#         query = query / sqrt(query.shape[-1])
-#         valid_mask = self._get_valid_mask(attention_mask)
-#         left, right = self._get_factors(query, key, valid_mask)
-#         return self._multiply(left, right, value)
-
-#     def _multiply(self, left: Tensor, right: Tensor, inputs: Tensor) -> Tensor:
-#         return left @ (right @ inputs)
-
-#     def _get_matrix_from_factors(self, left: Tensor, right: Tensor) -> Tensor:
-#         return left @ right
-
-#     def _get_valid_mask(self, attention_mask: Optional[Tensor]) -> Optional[Tensor]:
-#         if attention_mask is not None:
-#             attention_mask = rearrange(attention_mask, "b s -> b 1 1 s")
-#         return attention_mask
-
-#     def _mask(
-#         self, left_params, right_params: Tensor, valid_mask: Optional[Tensor]
-#     ) -> Tuple[Tensor, Tensor]:
-#         if valid_mask is None:
-#             return left_params, right_params
-#         return left_params * valid_mask.transpose(-1, -2), right_params * valid_mask
-
-#     def _grad(
-#         self,
-#         left_params: Tensor,
-#         right_params: Tensor,
-#         query: Tensor,
-#         key: Tensor,
-#     ) -> Tuple[Tensor, Tensor]:
-#         right_sphere = _safe_normalize(right_params, dim=-1)
-#         left_sphere = _safe_normalize(left_params, dim=-1)
-#         left = left_sphere**2
-#         right = right_sphere**2
-#         d_left = left @ (right @ right.mT) - query @ (key.mT @ right.mT)
-#         d_left = d_left * 2 * left_sphere
-#         d_left = d_left - _project(left_sphere, d_left)
-#         d_left = d_left * _safe_inv_norm(left_params, dim=-1)
-#         d_right = (left.mT @ left) @ right - (left.mT @ query) @ key.mT
-#         d_right = d_right * 2 * right_sphere
-#         d_right = d_right - _project(right_sphere, d_right)
-#         d_right = d_right * _safe_inv_norm(right_params, dim=-1)
-#         return d_left, d_right
-
-#     def _get_factors(
-#         self, query: Tensor, key: Tensor, valid_mask: Optional[Tensor]
-#     ) -> Tuple[Tensor, Tensor]:
-#         batch_size, num_heads, seq_len, head_dim = query.shape
-
-#         if valid_mask is not None:
-#             query = query * valid_mask.transpose(-1, -2)
-#             key = key * valid_mask.transpose(-1, -2)
-
-#         left_params = _simplex_init(
-#             (batch_size, num_heads, seq_len, self.rank),
-#             perturb_scale=self.perturb_scale,
-#             device=query.device,
-#         )
-#         right_params = _simplex_init(
-#             (batch_size, num_heads, self.rank, seq_len),
-#             perturb_scale=self.perturb_scale,
-#             device=query.device,
-#         )
-
-#         for _ in range(self.num_steps):
-#             left_params, right_params = self._mask(
-#                 left_params, right_params, valid_mask
-#             )
-#             d_left_params, d_right_params = self._grad(
-#                 left_params, right_params, query, key
-#             )
-#             left_params = left_params - self.step_size[..., None, None] * d_left_params
-#             right_params = (
-#                 right_params - self.step_size[..., None, None] * d_right_params
-#             )
-
-#         left_params, right_params = self._mask(left_params, right_params, valid_mask)
-
-#         left = _safe_normalize(left_params, dim=-1) ** 2
-#         right = _safe_normalize(right_params, dim=-1) ** 2
-
-#         return left, right
 
 
 class PadType(StrEnum):
@@ -188,15 +43,8 @@ class SobaMonarch(nn.Module):
         self.num_steps = num_steps
         self.pad_type = pad_type
 
-        self.register_parameter(
-            "log_attention_scale",
-            nn.Parameter(torch.zeros((num_heads,))),
-        )
-
-        self.register_parameter(
-            "log_step_size",
-            nn.Parameter(torch.zeros((num_heads, 2, num_steps))),
-        )
+        self.log_attention_scale = nn.Parameter(torch.zeros((num_heads,)))
+        self.log_step_size = nn.Parameter(torch.zeros((num_heads, 2, num_steps)))
 
     def get_matrix(
         self,

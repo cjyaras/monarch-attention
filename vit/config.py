@@ -3,7 +3,7 @@ from typing import Optional
 
 from transformers.models.vit.configuration_vit import ViTConfig
 
-from sobalib.layers import PadType
+from common.soba import PadType
 
 
 class AttentionType(StrEnum):
@@ -20,9 +20,8 @@ class CustomViTConfig(ViTConfig):
     def __init__(
         self,
         attention_type: AttentionType = AttentionType.softmax,
+        attn_module_save_path: Optional[str] = None,
         enable_flash_attention: bool = False,
-        log_attention_scale_path: Optional[str] = None,
-        log_step_size_path: Optional[str] = None,
         num_steps: Optional[int] = None,
         rank: Optional[int] = None,
         block_size: Optional[int] = None,
@@ -35,18 +34,17 @@ class CustomViTConfig(ViTConfig):
     ):
         super().__init__(**kwargs)
         self.attention_type = attention_type
+        self.attn_module_save_path = attn_module_save_path
 
         # Softmax
         self.enable_flash_attention = enable_flash_attention
 
-        # Sparsemax
-        self.log_attention_scale_path = log_attention_scale_path
+        # Sparsemax: none
 
         # SobaMonarch
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type
-        self.log_step_size_path = log_step_size_path
 
         # Linformer
         # self.rank used as projection dim

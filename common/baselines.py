@@ -95,10 +95,7 @@ class Sparsemax(nn.Module):
 
     def __init__(self, num_heads: int):
         super().__init__()
-        self.register_parameter(
-            "log_attention_scale",
-            nn.Parameter(torch.zeros((num_heads,))),
-        )
+        self.log_attention_scale = nn.Parameter(torch.zeros((num_heads,)))
 
     def get_matrix(
         self,
@@ -658,6 +655,7 @@ class Cosformer(nn.Module):
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
             assert valid_attention_mask is not None
+            # TODO: Fix error here
             query_cos_sin, key_cos_sin = self._mask(
                 query_cos_sin, key_cos_sin, valid_attention_mask
             )

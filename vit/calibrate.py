@@ -4,31 +4,37 @@ from typing import Dict, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from common.baselines import Softmax, Sparsemax
 from tqdm.auto import tqdm
+
+from common.baselines import Softmax, Sparsemax
+from common.soba import PadType, SobaMonarch
 from vit.config import AttentionType, get_config
 from vit.data import get_processed_dataset
 from vit.extract import extract_query_key
 from vit.model import get_model
 
-from sobalib.layers import PadType, SobaMonarch
-
 Tensor = torch.Tensor
+Params = Dict[str, Tensor]
+
+
+def get_attn_module_path(layer: int):
+    return f"vit.encoder.layer.{layer}.attention.attention.attn_module"
 
 
 def calibrate_sparsemax_layerwise(
     learning_rate: float,
     num_steps: int,
     num_samples: Optional[int] = None,
-) -> Dict[str, Tensor]:
-    config = get_config()
-    all_query, all_key = extract_query_key(config, num_samples=num_samples)
+) -> Params:
 
+    config = get_config()
+
+    all_query, all_key = extract_query_key(config, num_samples=num_samples)
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
     key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
     softmax = Softmax()
-    log_attention_scale = {}
+    sparsemax_params = {}
 
     for i in range(config.num_hidden_layers):
         query = query_per_layer[i]
@@ -36,6 +42,7 @@ def calibrate_sparsemax_layerwise(
         sparsemax = Sparsemax(config.num_attention_heads)
         optimizer = torch.optim.Adam(sparsemax.parameters(), lr=learning_rate)
         loss_vals = []
+
         for _ in tqdm(range(num_steps)):
             optimizer.zero_grad()
             softmax_out = softmax.get_matrix(query, key)
@@ -44,22 +51,24 @@ def calibrate_sparsemax_layerwise(
             loss.backward()
             optimizer.step()
             loss_vals.append(loss.item())
-        log_attention_scale[
-            f"vit.encoder.layer.{i}.attention.attention.attn_module.log_attention_scale"
-        ] = sparsemax.log_attention_scale.detach()
+
+        sparsemax_params[".".join([get_attn_module_path(i), "log_attention_scale"])] = (
+            sparsemax.log_attention_scale.detach()
+        )
+
         plt.plot(loss_vals)
         plt.show()
 
-    return log_attention_scale
+    return sparsemax_params
 
 
 def calibrate_sparsemax_logits(
     learning_rate: float,
     num_steps: int,
-    init_log_attention_scale: Optional[Dict[str, Tensor]] = None,
+    params_path: str,
     num_samples: Optional[int] = None,
     batch_size: Optional[int] = None,
-) -> Dict[str, Tensor]:
+) -> Params:
 
     # Load softmax model
     config = get_config()
@@ -67,15 +76,13 @@ def calibrate_sparsemax_logits(
 
     # Load sparsemax model
     config = get_config()
+    config.attn_module_save_path = params_path
     config.attention_type = AttentionType.sparsemax
-    config.scale_attention_temperature = True
     sparsemax_model = get_model(config)
-    if init_log_attention_scale is not None:
-        sparsemax_model.load_state_dict(init_log_attention_scale, strict=False)
 
-    # Freeze all parameters (except attention_scale)
+    # Freeze all parameters (except ones in attn_module)
     for k, v in sparsemax_model.named_parameters():
-        v.requires_grad = "log_attention_scale" in k
+        v.requires_grad = "attn_module" in k
 
     trainable_params = filter(lambda p: p.requires_grad, sparsemax_model.parameters())
 
@@ -112,34 +119,33 @@ def calibrate_sparsemax_logits(
     plt.plot(loss_vals)
     plt.show()
 
-    log_attention_scale = {
-        k: v
-        for k, v in sparsemax_model.state_dict().items()
-        if "log_attention_scale" in k
+    sparsemax_params = {
+        k: v for k, v in sparsemax_model.state_dict().items() if "attn_module" in k
     }
-    return log_attention_scale
+    return sparsemax_params
 
 
 def calibrate_soba_layerwise(
     learning_rate: float,
     num_steps: int,
-    init_log_attention_scale: Optional[Dict[str, Tensor]] = None,
+    params_path: str,
     num_samples: Optional[int] = None,
-) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
+) -> Params:
+
     config = get_config()
+
     all_query, all_key = extract_query_key(config, num_samples=num_samples)
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
     key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
-    softmax = Softmax()
+    sparsemax_params = torch.load(params_path, weights_only=True)
 
-    log_attention_scale = {}
-    log_step_size = {}
+    softmax = Softmax()
+    soba_params = {}
 
     for i in range(config.num_hidden_layers):
         query = query_per_layer[i]
         key = key_per_layer[i]
-
         soba = SobaMonarch(
             block_size=14,
             num_steps=3,
@@ -147,16 +153,14 @@ def calibrate_soba_layerwise(
             pad_type=PadType.pre,
         )
 
-        if init_log_attention_scale is not None:
-            soba.load_state_dict(
-                {
-                    "log_attention_scale": init_log_attention_scale[
-                        f"vit.encoder.layer.{i}.attention.attention.attn_module.log_attention_scale"
-                    ]
-                },
-                strict=False,
-            )
-
+        soba.load_state_dict(
+            {
+                k.split(".")[-1]: v
+                for k, v in sparsemax_params.items()
+                if str(i) in k and "attn_module" in k
+            },
+            strict=False,
+        )
         optimizer = torch.optim.Adam(soba.parameters(), lr=learning_rate)
         loss_vals = []
 
@@ -171,28 +175,27 @@ def calibrate_soba_layerwise(
 
         loss_vals = torch.tensor(loss_vals)
 
-        log_attention_scale[
-            f"vit.encoder.layer.{i}.attention.attention.attn_module.log_attention_scale"
-        ] = soba.log_attention_scale.detach()
+        soba_params[".".join([get_attn_module_path(i), "log_attention_scale"])] = (
+            soba.log_attention_scale.detach()
+        )
 
-        log_step_size[
-            f"vit.encoder.layer.{i}.attention.attention.attn_module.log_step_size"
-        ] = soba.log_step_size.detach()
+        soba_params[".".join([get_attn_module_path(i), "log_step_size"])] = (
+            soba.log_step_size.detach()
+        )
 
         plt.plot(loss_vals)
         plt.show()
 
-    return log_attention_scale, log_step_size
+    return soba_params
 
 
 def calibrate_soba_logits(
     learning_rate: float,
     num_steps: int,
-    init_log_attention_scale: Optional[Dict[str, Tensor]] = None,
-    init_log_step_size: Optional[Dict[str, Tensor]] = None,
+    params_path: str,
     num_samples: Optional[int] = None,
     batch_size: Optional[int] = None,
-) -> Tuple[Dict[str, Tensor], Dict[str, Tensor]]:
+) -> Params:
 
     # Load softmax model
     config = get_config()
@@ -201,15 +204,10 @@ def calibrate_soba_logits(
     # Load soba model
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
+    config.attn_module_save_path = params_path
     config.num_steps = 3
     config.block_size = 14
     soba_model = get_model(config)
-
-    if init_log_attention_scale is not None:
-        soba_model.load_state_dict(init_log_attention_scale, strict=False)
-
-    if init_log_step_size is not None:
-        soba_model.load_state_dict(init_log_step_size, strict=False)
 
     # Freeze all parameters (except attention_temperature and step_size)
     for k, v in soba_model.named_parameters():
@@ -250,57 +248,47 @@ def calibrate_soba_logits(
     plt.plot(loss_vals)
     plt.show()
 
-    log_attention_temperature = soba_model.log_attention_scale.detach()
-    log_step_size = soba_model.log_step_size.detach()
-    return log_attention_temperature, log_step_size
+    soba_params = {
+        k: v for k, v in soba_model.state_dict().items() if "attn_module" in k
+    }
+    return soba_params
+
+
+SPARSEMAX_PARAMS_PATH = "vit/sparsemax_params_layerwise.pt"
+SOBA_PARAMS_LAYERWISE_PATH = "vit/soba_params_layerwise.pt"
+SOBA_PARAMS_LOGITS_PATH = "vit/soba_params_logits.pt"
 
 
 def calibrate_sparsemax():
-    if not os.path.exists("vit/sparsemax_layerwise_log_attention_scale.pt"):
-        log_attention_scale = calibrate_sparsemax_layerwise(
+    if not os.path.exists(SPARSEMAX_PARAMS_PATH):
+        sparsemax_params = calibrate_sparsemax_layerwise(
             learning_rate=5e-2, num_steps=200, num_samples=4
         )
-        torch.save(
-            log_attention_scale, "vit/sparsemax_layerwise_log_attention_scale.pt"
-        )
+        torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
 
 
 def calibrate_soba():
-    assert os.path.exists("vit/sparsemax_layerwise_log_attention_scale.pt")
+    assert os.path.exists(SPARSEMAX_PARAMS_PATH)
 
-    log_attention_scale = torch.load(
-        "vit/sparsemax_layerwise_log_attention_scale.pt", weights_only=True
-    )
-
-    if not os.path.exists(
-        "vit/soba_layerwise_log_attention_scale.pt"
-    ) or not os.path.exists("vit/soba_layerwise_log_step_size.pt"):
-        log_attention_scale, log_step_size = calibrate_soba_layerwise(
+    if not os.path.exists(SOBA_PARAMS_LAYERWISE_PATH):
+        soba_params = calibrate_soba_layerwise(
             learning_rate=5e-2,
             num_steps=300,
-            init_log_attention_scale=log_attention_scale,
+            params_path=SPARSEMAX_PARAMS_PATH,
             num_samples=4,
         )
-        torch.save(log_attention_scale, "vit/soba_layerwise_log_attention_scale.pt")
-        torch.save(log_step_size, "vit/soba_layerwise_log_step_size.pt")
-    else:
-        log_attention_scale = torch.load(
-            "vit/soba_layerwise_log_attention_scale.pt", weights_only=True
-        )
-        log_step_size = torch.load(
-            "vit/soba_layerwise_log_step_size.pt", weights_only=True
-        )
+        torch.save(soba_params, SOBA_PARAMS_LAYERWISE_PATH)
 
-    log_attention_scale, log_step_size = calibrate_soba_logits(
-        learning_rate=1e-2,
-        num_steps=1000,
-        init_log_attention_scale=log_attention_scale,
-        init_log_step_size=log_step_size,
-        num_samples=16,
-        batch_size=4,
-    )
-    torch.save(log_attention_scale, "vit/soba_logits_log_attention_scale.pt")
-    torch.save(log_step_size, "vit/soba_logits_log_step_size.pt")
+    if not os.path.exists(SOBA_PARAMS_LOGITS_PATH):
+
+        soba_params = calibrate_soba_logits(
+            learning_rate=1e-2,
+            num_steps=1000,
+            params_path=SOBA_PARAMS_LAYERWISE_PATH,
+            num_samples=16,
+            batch_size=4,
+        )
+        torch.save(soba_params, SOBA_PARAMS_LOGITS_PATH)
 
 
 def main():

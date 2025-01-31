@@ -2,9 +2,10 @@ from typing import Dict, List, TypeVar
 
 import torch
 import torch.nn as nn
-from common.baselines import Softmax, Sparsemax
 from torch._prims_common import DeviceLikeType
 from transformers.image_processing_base import BatchFeature
+
+from common.baselines import Softmax, Sparsemax
 
 T = TypeVar("T")
 
