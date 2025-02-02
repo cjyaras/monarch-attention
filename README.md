@@ -7,8 +7,7 @@
 Requires `python>=3.10`. How to run ViT example:
 
 ```
-python -m venv .venv
+./setup.sh
 source .venv/bin/activate
-pip install .
 python -m vit.benchmark.py
 ```
