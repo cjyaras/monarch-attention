@@ -8,6 +8,7 @@ from tqdm.auto import tqdm
 
 from common.baselines import Softmax, Sparsemax
 from common.soba import PadType, SobaMonarch
+from common.utils import get_device
 from vit.config import AttentionType, get_config
 from vit.data import get_processed_dataset
 from vit.extract import extract_query_key
@@ -27,23 +28,22 @@ def calibrate_sparsemax_layerwise(
     num_samples: Optional[int] = None,
 ) -> Params:
 
+    device = get_device()
     config = get_config()
 
     all_query, all_key = extract_query_key(
-        config,
-        num_samples=num_samples,
-        split="train",
+        config, num_samples=num_samples, split="train"
     )
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
     key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
-    softmax = Softmax()
+    softmax = Softmax().to(device)
     sparsemax_params = {}
 
     for i in range(config.num_hidden_layers):
         query = query_per_layer[i]
         key = key_per_layer[i]
-        sparsemax = Sparsemax(config.num_attention_heads)
+        sparsemax = Sparsemax(config.num_attention_heads).to(device)
         optimizer = torch.optim.Adam(sparsemax.parameters(), lr=learning_rate)
         loss_vals = []
 
@@ -136,6 +136,7 @@ def calibrate_soba_layerwise(
     num_samples: Optional[int] = None,
 ) -> Params:
 
+    device = get_device()
     config = get_config()
 
     all_query, all_key = extract_query_key(
@@ -146,7 +147,7 @@ def calibrate_soba_layerwise(
 
     sparsemax_params = torch.load(params_path, weights_only=True)
 
-    softmax = Softmax()
+    softmax = Softmax().to(device)
     soba_params = {}
 
     for i in range(config.num_hidden_layers):
@@ -157,7 +158,7 @@ def calibrate_soba_layerwise(
             num_steps=3,
             num_heads=config.num_attention_heads,
             pad_type=PadType.pre,
-        )
+        ).to(device)
 
         soba.load_state_dict(
             {
