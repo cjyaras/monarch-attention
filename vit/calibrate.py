@@ -261,27 +261,38 @@ def calibrate_soba_logits(
     return soba_params
 
 
-SPARSEMAX_PARAMS_PATH = "vit/sparsemax_params_layerwise.pt"
+SPARSEMAX_PARAMS_LAYERWISE_PATH = "vit/sparsemax_params_layerwise.pt"
+SPARSEMAX_PARAMS_LOGITS_PATH = "vit/sparsemax_params_logits.pt"
 SOBA_PARAMS_LAYERWISE_PATH = "vit/soba_params_layerwise.pt"
 SOBA_PARAMS_LOGITS_PATH = "vit/soba_params_logits.pt"
 
 
 def calibrate_sparsemax():
-    if not os.path.exists(SPARSEMAX_PARAMS_PATH):
+    if not os.path.exists(SPARSEMAX_PARAMS_LAYERWISE_PATH):
         sparsemax_params = calibrate_sparsemax_layerwise(
-            learning_rate=5e-2, num_steps=200, num_samples=4
+            learning_rate=5e-2, num_steps=300, num_samples=4
         )
-        torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
+        torch.save(sparsemax_params, SPARSEMAX_PARAMS_LAYERWISE_PATH)
+
+    if not os.path.exists(SPARSEMAX_PARAMS_LOGITS_PATH):
+        sparsemax_params = calibrate_sparsemax_logits(
+            learning_rate=1e-2,
+            num_steps=1000,
+            params_path=SPARSEMAX_PARAMS_LAYERWISE_PATH,
+            num_samples=256,
+            batch_size=16,
+        )
+        torch.save(sparsemax_params, SPARSEMAX_PARAMS_LOGITS_PATH)
 
 
 def calibrate_soba():
-    assert os.path.exists(SPARSEMAX_PARAMS_PATH)
+    assert os.path.exists(SPARSEMAX_PARAMS_LAYERWISE_PATH)
 
     if not os.path.exists(SOBA_PARAMS_LAYERWISE_PATH):
         soba_params = calibrate_soba_layerwise(
             learning_rate=5e-2,
             num_steps=300,
-            params_path=SPARSEMAX_PARAMS_PATH,
+            params_path=SPARSEMAX_PARAMS_LAYERWISE_PATH,
             num_samples=4,
         )
         torch.save(soba_params, SOBA_PARAMS_LAYERWISE_PATH)
@@ -292,8 +303,8 @@ def calibrate_soba():
             learning_rate=1e-2,
             num_steps=1000,
             params_path=SOBA_PARAMS_LAYERWISE_PATH,
-            num_samples=16,
-            batch_size=4,
+            num_samples=256,
+            batch_size=16,
         )
         torch.save(soba_params, SOBA_PARAMS_LOGITS_PATH)
 
