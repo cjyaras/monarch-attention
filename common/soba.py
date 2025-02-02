@@ -44,7 +44,7 @@ class SobaMonarch(nn.Module):
         self.pad_type = pad_type
 
         self.log_attention_scale = nn.Parameter(torch.zeros((num_heads,)))
-        self.log_step_size = nn.Parameter(torch.zeros((num_heads, 2, num_steps)))
+        self.log_step_size = nn.Parameter(torch.zeros((num_heads, 2)))
 
     def get_matrix(
         self,
@@ -236,13 +236,11 @@ class SobaMonarch(nn.Module):
 
             left_params = (
                 left_params
-                - torch.exp(self.log_step_size[:, 0, step, None, None, None])
-                * d_left_params
+                - torch.exp(self.log_step_size[:, 0, None, None, None]) * d_left_params
             )
             right_params = (
                 right_params
-                - torch.exp(self.log_step_size[:, 1, step, None, None, None])
-                * d_right_params
+                - torch.exp(self.log_step_size[:, 1, None, None, None]) * d_right_params
             )
 
             left_params, right_params = self._mask(

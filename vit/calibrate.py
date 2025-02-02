@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,7 +29,11 @@ def calibrate_sparsemax_layerwise(
 
     config = get_config()
 
-    all_query, all_key = extract_query_key(config, num_samples=num_samples)
+    all_query, all_key = extract_query_key(
+        config,
+        num_samples=num_samples,
+        split="train",
+    )
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
     key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
@@ -90,7 +94,7 @@ def calibrate_sparsemax_logits(
     optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
 
     # Load dataset
-    dataset = get_processed_dataset(num_samples=num_samples)
+    dataset = get_processed_dataset(num_samples=num_samples, split="train")
 
     loss_fn = lambda x, y: torch.nn.functional.kl_div(
         x.log_softmax(-1), y.log_softmax(-1), reduction="batchmean", log_target=True
@@ -134,7 +138,9 @@ def calibrate_soba_layerwise(
 
     config = get_config()
 
-    all_query, all_key = extract_query_key(config, num_samples=num_samples)
+    all_query, all_key = extract_query_key(
+        config, num_samples=num_samples, split="train"
+    )
     query_per_layer = torch.unbind(all_query.transpose(1, 0))
     key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
@@ -219,7 +225,7 @@ def calibrate_soba_logits(
     optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
 
     # Load dataset
-    dataset = get_processed_dataset(num_samples=num_samples)
+    dataset = get_processed_dataset(num_samples=num_samples, split="train")
 
     loss_fn = lambda x, y: torch.nn.functional.kl_div(
         x.log_softmax(-1), y.log_softmax(-1), reduction="batchmean", log_target=True

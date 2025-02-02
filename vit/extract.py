@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
+
 from vit.config import CustomViTConfig
 from vit.data import get_dataset
 from vit.evaluation import CustomImageClassificationEvaluator
@@ -18,7 +19,7 @@ def _register_qk_hook(
     layers = model.vit.encoder.layer
 
     for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.attention.attn_module
+        attn_layer = layers[layer_idx].attention.attention.attn_module  # type: ignore
 
         def qk_hook(_layer_idx):
             def hook(module, input, output):
@@ -28,15 +29,18 @@ def _register_qk_hook(
 
             return hook
 
-        attn_layer.register_forward_hook(qk_hook(layer_idx))
+        attn_layer.register_forward_hook(qk_hook(layer_idx))  # type: ignore
 
 
 @torch.no_grad()
 def extract_query_key(
-    config: CustomViTConfig, num_samples: Optional[int] = None, batch_size: int = 1
+    config: CustomViTConfig,
+    num_samples: Optional[int] = None,
+    batch_size: int = 1,
+    split: str = "validation",
 ) -> Tuple[Tensor, Tensor]:
 
-    dataset = get_dataset(num_samples=num_samples)
+    dataset = get_dataset(num_samples=num_samples, split=split)
     evaluator = CustomImageClassificationEvaluator(top_k=1)
     metric = TopKAccuracy()
 
