@@ -680,3 +680,9 @@ class Cosformer(nn.Module):
         if mask is not None:
             mask = rearrange(mask, "b s -> b 1 1 s")
         return mask
+    
+    def _mask(query: Tensor, key: Tensor, valid_attention_mask: Tensor) -> Tuple[Tensor, Tensor]:
+        return (
+            query * valid_attention_mask.transpose(-2, -1), 
+            key * valid_attention_mask.transpose(-2, -1)
+        )
