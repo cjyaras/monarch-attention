@@ -1,8 +1,9 @@
-from common.utils import get_device
 from transformers import pipeline
 from transformers.pipelines import PIPELINE_REGISTRY
 from transformers.pipelines.image_classification import ImageClassificationPipeline
 from transformers.utils.import_utils import requires_backends
+
+from common.utils import get_device
 from vit.config import CustomViTConfig
 from vit.model import CustomViTForImageClassification, get_model
 from vit.processor import get_processor

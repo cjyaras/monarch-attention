@@ -1,8 +1,8 @@
 from typing import Dict
 
-import torch
-from common.logging import Logger
 from evaluate import QuestionAnsweringEvaluator
+
+from common.logging import Logger
 from roberta.config import CustomRobertaConfig
 from roberta.data import get_dataset
 from roberta.pipeline import CustomQuestionAnsweringPipeline, get_pipeline
@@ -31,8 +31,8 @@ class Evaluator:
             self.evaluator.compute(
                 model_or_pipeline=pipe,
                 data=self.dataset.take(self.batch_size),
-                metric="squad_v2",
-                squad_v2_format=True,
+                metric="squad",  # metric="squad_v2",
+                squad_v2_format=False,  # squad_v2_format=True,
             )
             return sum(
                 [
@@ -51,8 +51,8 @@ class Evaluator:
         result = self.evaluator.compute(
             model_or_pipeline=pipe,
             data=self.dataset,
-            metric="squad_v2",
-            squad_v2_format=True,
+            metric="squad",  # metric="squad_v2",
+            squad_v2_format=False,  # squad_v2_format=True,
         )
         assert isinstance(result, Dict)
         result["total_attention_bmm_flops"] = flop_count

@@ -9,6 +9,8 @@ from torch.nn.functional import pad
 
 Tensor = torch.Tensor
 
+torch.set_float32_matmul_precision("high")
+
 
 def _project(x: Tensor, u: Tensor) -> Tensor:
     return torch.einsum("...i,...j,...j->...i", x, x, u)
@@ -43,8 +45,8 @@ class SobaMonarch(nn.Module):
         self.num_steps = num_steps
         self.pad_type = pad_type
 
-        self.log_attention_scale = nn.Parameter(torch.zeros((num_heads,)))
-        self.log_step_size = nn.Parameter(torch.zeros((num_heads, 2)))
+        self.attention_scale = nn.Parameter(torch.zeros((num_heads,)))
+        self.step_size = nn.Parameter(torch.zeros((num_heads, 2, num_steps)))
 
     def get_matrix(
         self,
@@ -58,7 +60,9 @@ class SobaMonarch(nn.Module):
             assert attention_mask.shape == (batch_size, seq_len)
 
         query = query / sqrt(head_dim)
-        query = query * torch.exp(self.log_attention_scale[..., None, None])
+        query = query * torch.nn.functional.softplus(
+            self.attention_scale[..., None, None]
+        )
 
         pad_amount = self._get_pad_amount(seq_len)
         valid_mask = self._get_valid_mask(attention_mask)
@@ -79,7 +83,9 @@ class SobaMonarch(nn.Module):
             assert attention_mask.shape == (batch_size, seq_len)
 
         query = query / sqrt(head_dim)
-        query = query * torch.exp(self.log_attention_scale[..., None, None])
+        query = query * torch.nn.functional.softplus(
+            self.attention_scale[..., None, None]
+        )
 
         valid_mask = self._get_valid_mask(attention_mask)
         left, right = self._get_factors(query, key, valid_mask)
@@ -236,11 +242,17 @@ class SobaMonarch(nn.Module):
 
             left_params = (
                 left_params
-                - torch.exp(self.log_step_size[:, 0, None, None, None]) * d_left_params
+                - torch.nn.functional.softplus(
+                    self.step_size[:, 0, step, None, None, None]
+                )
+                * d_left_params
             )
             right_params = (
                 right_params
-                - torch.exp(self.log_step_size[:, 1, None, None, None]) * d_right_params
+                - torch.nn.functional.softplus(
+                    self.step_size[:, 1, step, None, None, None]
+                )
+                * d_right_params
             )
 
             left_params, right_params = self._mask(

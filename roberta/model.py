@@ -1,9 +1,6 @@
 from typing import Optional, Tuple
 
 import torch
-from common.baselines import Softmax, Sparsemax
-from common.utils import maybe_compile
-from roberta.config import AttentionType, CustomRobertaConfig
 from transformers.models.roberta.modeling_roberta import (
     RobertaAttention,
     RobertaForMaskedLM,
@@ -14,7 +11,10 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.utils.logging import ERROR, set_verbosity
 
-from sobalib.layers import SobaMonarch
+from common.baselines import Softmax, Sparsemax
+from common.soba import SobaMonarch
+from common.utils import get_device, maybe_compile
+from roberta.config import AttentionType, CustomRobertaConfig
 
 set_verbosity(ERROR)
 
@@ -27,33 +27,26 @@ ATTENTION_TYPE_TO_MODULE = {
 }
 
 
-def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
+def prepare_args(config: CustomRobertaConfig) -> Tuple:
 
-    if config.attention_type == AttentionType.softmax:
-        return (config.enable_flash_attention,)
+    match config.attention_type:
 
-    elif config.attention_type == AttentionType.sparsemax:
-        return ()
+        case AttentionType.softmax:
+            return (config.enable_flash_attention,)
 
-    elif config.attention_type == AttentionType.soba_monarch:
-        return (
-            config.block_size,
-            config.num_steps,
-            config.step_size,
-            config.num_attention_heads,
-            config.pad_type,
-        )
+        case AttentionType.sparsemax:
+            return (config.num_attention_heads,)
 
-    elif config.attention_type == AttentionType.hybrid:
-        assert config.hybrid_attention_layers is not None
-        return (
-            (config.block_size, config.num_steps, config.step_size, config.pad_type)
-            if layer_num in config.hybrid_attention_layers
-            else ()
-        )
+        case AttentionType.soba_monarch:
+            return (
+                config.block_size,
+                config.num_steps,
+                config.num_attention_heads,
+                config.pad_type,
+            )
 
-    else:
-        raise ValueError(f"Invalid attention type: {config.attention_type}")
+        case _:
+            raise ValueError(f"Invalid attention type: {config.attention_type}")
 
 
 class CustomRobertaSelfAttention(RobertaSelfAttention):
@@ -64,29 +57,10 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         assert self.position_embedding_type == "absolute"
         assert not self.is_decoder
 
-        if config.attention_type == AttentionType.hybrid:
-            assert config.hybrid_attention_layers is not None
-            module = ATTENTION_TYPE_TO_MODULE[
-                (
-                    AttentionType.soba_monarch
-                    if layer_num in config.hybrid_attention_layers
-                    else AttentionType.sparsemax
-                )
-            ]
-        else:
-            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
+        module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
 
-        self.attn_module = module(*prepare_args(config, layer_num))
+        self.attn_module = module(*prepare_args(config))
         maybe_compile(self.attn_module)
-
-        if config.scale_attention_temperature:
-            self.register_buffer(
-                "attention_temperature",
-                torch.full((self.num_attention_heads,), 1.0),
-                persistent=True,
-            )
-        else:
-            self.attention_temperature = None
 
     # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
     def load_state_dict(self, state_dict, **kwargs):
@@ -120,9 +94,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         key_layer = self.transpose_for_scores(self.key(hidden_states))
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        if self.attention_temperature is not None:
-            query_layer = query_layer / self.attention_temperature[..., None, None]
 
         context_layer = self.attn_module(
             query_layer, key_layer, value_layer, attention_mask
@@ -204,13 +175,17 @@ class CustomRobertaForQuestionAnswering(RobertaForQuestionAnswering):
 
 
 def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
+    device = get_device()
     model = CustomRobertaForQuestionAnswering.from_pretrained(
-        "deepset/roberta-base-squad2", config=config
+        "csarron/roberta-base-squad-v1",
+        config=config,  # deepset/roberta-base-squad2", config=config
     )
-    if config.scale_attention_temperature:
-        model.load_state_dict(
-            torch.load("roberta/sparsemax_temperature.pt", weights_only=True),
-            strict=False,
-        )
+    model = model.to(device)  # type: ignore
     model.eval()
+
+    if config.attn_module_save_path is not None:
+        model.load_state_dict(
+            torch.load(config.attn_module_save_path, weights_only=True), strict=False
+        )
+
     return model

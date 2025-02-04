@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Tuple
 
 import torch
+
 from roberta.config import CustomRobertaConfig
 from roberta.data import get_dataset
 from roberta.evaluation import CustomQuestionAnsweringEvaluator
@@ -17,7 +18,7 @@ def _register_qk_hook(
     layers = model.roberta.encoder.layer
 
     for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.self.attn_module
+        attn_layer = layers[layer_idx].attention.self.attn_module  # type: ignore
 
         def qk_hook(_layer_idx):
             def hook(module, input, output):
@@ -30,7 +31,7 @@ def _register_qk_hook(
 
             return hook
 
-        attn_layer.register_forward_hook(qk_hook(layer_idx))
+        attn_layer.register_forward_hook(qk_hook(layer_idx))  # type: ignore
 
 
 @torch.no_grad()
@@ -38,9 +39,10 @@ def extract_query_key_mask(
     config: CustomRobertaConfig,
     num_samples: Optional[int] = None,
     batch_size: int = 1,
-) -> Tuple[List[Tensor], List[Tensor], List[Tensor]]:
+    split: str = "validation",
+) -> Tuple[Tensor, Tensor, Tensor]:
 
-    dataset = get_dataset(num_samples=num_samples)
+    dataset = get_dataset(num_samples=num_samples, split=split)
     evaluator = CustomQuestionAnsweringEvaluator()
 
     pipe = get_pipeline(config, batch_size=batch_size)
@@ -58,30 +60,20 @@ def extract_query_key_mask(
         squad_v2_format=True,
     )
 
-    query = list(
-        torch.unbind(
-            torch.stack(
-                [
-                    torch.cat(layer_intermediates["query"])
-                    for layer_intermediates in all_layer_intermediates
-                ]
-            ).transpose(1, 0)
-        )
-    )
+    query = torch.stack(
+        [
+            torch.cat(layer_intermediates["query"])
+            for layer_intermediates in all_layer_intermediates
+        ]
+    ).transpose(1, 0)
 
-    key = list(
-        torch.unbind(
-            torch.stack(
-                [
-                    torch.cat(layer_intermediates["key"])
-                    for layer_intermediates in all_layer_intermediates
-                ]
-            ).transpose(1, 0)
-        )
-    )
+    key = torch.stack(
+        [
+            torch.cat(layer_intermediates["key"])
+            for layer_intermediates in all_layer_intermediates
+        ]
+    ).transpose(1, 0)
 
-    attention_mask = list(
-        torch.unbind(torch.cat(all_layer_intermediates[0]["attention_mask"]))
-    )
+    attention_mask = torch.cat(all_layer_intermediates[0]["attention_mask"])
 
     return query, key, attention_mask

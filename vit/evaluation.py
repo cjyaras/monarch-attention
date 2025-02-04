@@ -1,7 +1,8 @@
 from typing import Dict
 
-from common.logging import Logger
 from evaluate import ImageClassificationEvaluator
+
+from common.logging import Logger
 from vit.config import CustomViTConfig
 from vit.data import get_dataset
 from vit.metric import TopKAccuracy

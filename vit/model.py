@@ -35,34 +35,36 @@ ATTENTION_TYPE_TO_MODULE = {
 
 def prepare_args(config: CustomViTConfig) -> Tuple:
 
-    if config.attention_type == AttentionType.softmax:
-        return (config.enable_flash_attention,)
+    match config.attention_type:
 
-    elif config.attention_type == AttentionType.sparsemax:
-        return (config.num_attention_heads,)
+        case AttentionType.softmax:
+            return (config.enable_flash_attention,)
 
-    elif config.attention_type == AttentionType.soba_monarch:
-        return (
-            config.block_size,
-            config.num_steps,
-            config.num_attention_heads,
-            config.pad_type,
-        )
+        case AttentionType.sparsemax:
+            return (config.num_attention_heads,)
 
-    elif config.attention_type == AttentionType.linformer:
-        return (config.rank, config.seq_len, config.share_kv)
+        case AttentionType.soba_monarch:
+            return (
+                config.block_size,
+                config.num_steps,
+                config.num_attention_heads,
+                config.pad_type,
+            )
 
-    elif config.attention_type == AttentionType.performer:
-        return (config.rank, config.estimator_type, config.ortho_features)
+        case AttentionType.linformer:
+            return (config.rank, config.seq_len, config.share_kv)
 
-    elif config.attention_type == AttentionType.nystromformer:
-        return (config.rank, config.num_attention_heads, config.conv_kernel_size)
+        case AttentionType.performer:
+            return (config.rank, config.estimator_type, config.ortho_features)
 
-    elif config.attention_type == AttentionType.cosformer:
-        return ()
+        case AttentionType.nystromformer:
+            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
 
-    else:
-        raise ValueError(f"Invalid attention type: {config.attention_type}")
+        case AttentionType.cosformer:
+            return ()
+
+        case _:
+            raise ValueError(f"Invalid attention type: {config.attention_type}")
 
 
 class CustomViTSelfAttention(ViTSelfAttention):

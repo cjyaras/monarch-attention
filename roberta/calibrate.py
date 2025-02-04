@@ -1,105 +1,159 @@
-from typing import List
+import os
+from typing import Dict, Optional
 
 import torch
-from common.baselines import Softmax, Sparsemax
-from common.utils import get_device
-from roberta.config import get_config
-from roberta.extract import extract_query_key_mask
 from tqdm.auto import tqdm
 
+from common.baselines import Softmax, Sparsemax
+from common.soba import PadType, SobaMonarch
+from common.utils import get_device, maybe_compile
+from roberta.config import get_config
+from roberta.extract import extract_query_key_mask
+
 Tensor = torch.Tensor
+Params = Dict[str, Tensor]
 
-NUM_SAMPLES = 16
-BATCH_SIZE = 4
-SEARCH_RANGE = (1.0, 50.0)
-SEARCH_STEPS = 64
-ORD = 2
-
-
-@torch.no_grad()
-def calibrate_sparsemax_temperature(
-    query_list: List[Tensor],
-    key_list: List[Tensor],
-    attention_mask_vals: List[Tensor],
-    attention_temperature_vals: Tensor,
-) -> Tensor:
-    """
-    query_list: List of [num_layers, num_heads, seq_len, dim_per_head]
-    key_list: List of [num_layers, num_heads, seq_len, dim_per_head]
-    attention_mask_vals: List of [seq_len]
-    attention_temperature_vals: [num_temperatures]
-
-    returns: [num_layers, num_heads]
-    """
-    num_layers, num_heads, seq_len, dim_per_head = query_list[0].shape
-    search_size = len(attention_temperature_vals)
-    differences = torch.zeros(
-        search_size,
-        num_layers * num_heads,
-        device=query_list[0].device,
-    )
-
-    assert search_size % BATCH_SIZE == 0
-
-    softmax = Softmax()
-    sparsemax = Sparsemax()
-
-    for i in tqdm(range(len(query_list))):
-        query = query_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
-        key = key_list[i].reshape(1, num_layers * num_heads, seq_len, dim_per_head)
-        attention_mask = attention_mask_vals[i].reshape(1, seq_len)
-        softmax_attn_probs = softmax.get_matrix(query, key)
-
-        for j in range(0, search_size, BATCH_SIZE):
-            sparsemax_attn_probs = sparsemax.get_matrix(
-                query
-                / attention_temperature_vals[j : j + BATCH_SIZE, None, None, None],
-                key
-                / torch.ones_like(
-                    attention_temperature_vals[j : j + BATCH_SIZE, None, None, None]
-                ),
-                attention_mask
-                / torch.ones_like(attention_temperature_vals[j : j + BATCH_SIZE, None]),
-            )
-            attn_weights_diff = torch.flatten(
-                softmax_attn_probs - sparsemax_attn_probs, start_dim=-2
-            )
-            differences[j : j + BATCH_SIZE] += torch.linalg.norm(
-                attn_weights_diff, ord=ORD, dim=-1
-            )
-
-    optimal_temperature_idx = differences.min(dim=0)[1]
-    optimal_temperature = attention_temperature_vals[
-        optimal_temperature_idx.reshape(num_layers, num_heads)
-    ]
-    return optimal_temperature
+kl_div = lambda x, y: torch.nn.functional.kl_div(
+    x.log_softmax(-1), y.log_softmax(-1), reduction="batchmean", log_target=True
+)
 
 
-@torch.no_grad()
-def main():
-    config = get_config()
+def get_attn_module_path(layer: int):
+    return f"roberta.encoder.layer.{layer}.attention.self.attn_module"
+
+
+def calibrate_sparsemax(
+    learning_rate: float,
+    num_steps: int,
+    num_samples: Optional[int] = None,
+) -> Params:
+
     device = get_device()
+    config = get_config()
 
-    all_query, all_key, all_attention_mask = extract_query_key_mask(
-        config, NUM_SAMPLES, batch_size=BATCH_SIZE
+    all_query, all_key, attention_mask = extract_query_key_mask(
+        config, num_samples=num_samples, split="train"
     )
+    query_per_layer = torch.unbind(all_query.transpose(1, 0))
+    key_per_layer = torch.unbind(all_key.transpose(1, 0))
 
-    optimal_temperature = calibrate_sparsemax_temperature(
-        all_query,
-        all_key,
-        all_attention_mask,
-        torch.linspace(*SEARCH_RANGE, SEARCH_STEPS).to(device),
-    )
+    softmax = Softmax().to(device)
+    sparsemax_params = {}
 
-    torch.save(
-        {
-            f"roberta.encoder.layer.{i}.attention.self.attention_temperature": optimal_temperature[
-                i
-            ]
-            for i in range(len(optimal_temperature))
-        },
-        "roberta/sparsemax_temperature.pt",
+    for i in (pbar := tqdm(range(config.num_hidden_layers))):
+        pbar.set_description(f"Layer {i}")
+        query = query_per_layer[i]
+        key = key_per_layer[i]
+        sparsemax = Sparsemax(config.num_attention_heads).to(device)
+        optimizer = torch.optim.Adam(sparsemax.parameters(), lr=learning_rate)
+
+        for _ in (pbar2 := tqdm(range(num_steps), leave=True)):
+            optimizer.zero_grad()
+            softmax_out = softmax.get_matrix(query, key, attention_mask=attention_mask)
+            sparsemax_out = sparsemax.get_matrix(
+                query, key, attention_mask=attention_mask
+            )
+            loss = kl_div(sparsemax_out, softmax_out)
+            loss.backward()
+            optimizer.step()
+            pbar2.set_description(f"Loss: {loss.item():0.2e}")
+
+        sparsemax_params[".".join([get_attn_module_path(i), "attention_scale"])] = (
+            sparsemax.attention_scale.detach()
+        )
+
+    return sparsemax_params
+
+
+def calibrate_soba(
+    learning_rate: float,
+    num_steps: int,
+    params_path: str,
+    num_samples: Optional[int] = None,
+) -> Params:
+
+    device = get_device()
+    config = get_config()
+
+    all_query, all_key, attention_mask = extract_query_key_mask(
+        config, num_samples=num_samples, split="train"
     )
+    query_per_layer = torch.unbind(all_query.transpose(1, 0))
+    key_per_layer = torch.unbind(all_key.transpose(1, 0))
+
+    sparsemax_params = torch.load(params_path, weights_only=True)
+
+    softmax = Softmax().to(device)
+    soba_params = {}
+
+    for i in (pbar := tqdm(range(config.num_hidden_layers))):
+        pbar.set_description(f"Layer {i}")
+
+        query = query_per_layer[i]
+        key = key_per_layer[i]
+        soba = SobaMonarch(
+            block_size=14,
+            num_steps=3,
+            num_heads=config.num_attention_heads,
+            pad_type=PadType.pre,
+        ).to(device)
+        maybe_compile(soba)
+
+        soba.load_state_dict(
+            {
+                k.split(".")[-1]: v
+                for k, v in sparsemax_params.items()
+                if str(i) in k and "attn_module" in k
+            },
+            strict=False,
+        )
+
+        for k, v in soba.named_parameters():
+            v.requires_grad = True
+
+        trainable_params = filter(lambda p: p.requires_grad, soba.parameters())
+
+        optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
+
+        for _ in (pbar2 := tqdm(range(num_steps), leave=True)):
+            optimizer.zero_grad()
+            softmax_out = softmax.get_matrix(query, key, attention_mask=attention_mask)
+            soba_out = soba.get_matrix(query, key, attention_mask=attention_mask)
+            loss = kl_div(soba_out, softmax_out)
+            loss.backward()
+            optimizer.step()
+            pbar2.set_description(f"Loss: {loss.item():0.2e}")
+
+        soba_params[".".join([get_attn_module_path(i), "attention_scale"])] = (
+            soba.attention_scale.detach()
+        )
+
+        soba_params[".".join([get_attn_module_path(i), "step_size"])] = (
+            soba.step_size.detach()
+        )
+
+    return soba_params
+
+
+SPARSEMAX_PARAMS_PATH = "roberta/sparsemax_params.pt"
+SOBA_PARAMS_PATH = "roberta/soba_params.pt"
+
+
+def main():
+    if not os.path.exists(SPARSEMAX_PARAMS_PATH):
+        sparsemax_params = calibrate_sparsemax(
+            learning_rate=0.1, num_steps=500, num_samples=8
+        )
+        torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
+
+    if not os.path.exists(SOBA_PARAMS_PATH):
+        soba_params = calibrate_soba(
+            learning_rate=0.1,
+            num_steps=500,
+            params_path=SPARSEMAX_PARAMS_PATH,
+            num_samples=8,
+        )
+        torch.save(soba_params, SOBA_PARAMS_PATH)
 
 
 if __name__ == "__main__":

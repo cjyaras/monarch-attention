@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 from torch._prims_common import DeviceLikeType
 from transformers.image_processing_base import BatchFeature
+from transformers.tokenization_utils_base import BatchEncoding
 
 from common.baselines import Softmax, Sparsemax
 
@@ -13,7 +14,7 @@ Tensor = torch.Tensor
 
 
 def move(obj: T, device: DeviceLikeType) -> T:
-    if isinstance(obj, (Tensor, BatchFeature)):
+    if isinstance(obj, (Tensor, BatchFeature, BatchEncoding)):
         return obj.to(device)  # type: ignore
     elif isinstance(obj, List):
         return [move(v, device) for v in obj]  # type: ignore
