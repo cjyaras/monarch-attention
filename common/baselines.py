@@ -6,8 +6,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange
-from entmax import sparsemax
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
+
+from common.activations import sparsemax
 
 Tensor = torch.Tensor
 
@@ -125,7 +126,6 @@ class Sparsemax(nn.Module):
             attention_scores = attention_scores + attention_mask
 
         attention_probs = sparsemax(attention_scores, dim=-1)
-        assert isinstance(attention_probs, Tensor)
         return attention_probs
 
     def forward(
@@ -157,7 +157,6 @@ class Sparsemax(nn.Module):
             attention_scores = attention_scores + attention_mask
 
         attention_probs = sparsemax(attention_scores, dim=-1)
-        assert isinstance(attention_probs, Tensor)
         return torch.matmul(attention_probs, value)
 
 
@@ -655,7 +654,6 @@ class Cosformer(nn.Module):
             assert attention_mask.shape == (batch_size, seq_len)
             valid_attention_mask = self._get_valid_mask(attention_mask)
             assert valid_attention_mask is not None
-            # TODO: Fix error here
             query_cos_sin, key_cos_sin = self._mask(
                 query_cos_sin, key_cos_sin, valid_attention_mask
             )
@@ -680,9 +678,11 @@ class Cosformer(nn.Module):
         if mask is not None:
             mask = rearrange(mask, "b s -> b 1 1 s")
         return mask
-    
-    def _mask(query: Tensor, key: Tensor, valid_attention_mask: Tensor) -> Tuple[Tensor, Tensor]:
+
+    def _mask(
+        self, query: Tensor, key: Tensor, valid_attention_mask: Tensor
+    ) -> Tuple[Tensor, Tensor]:
         return (
-            query * valid_attention_mask.transpose(-2, -1), 
-            key * valid_attention_mask.transpose(-2, -1)
+            query * valid_attention_mask.transpose(-2, -1),
+            key * valid_attention_mask.transpose(-2, -1),
         )

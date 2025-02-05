@@ -4,9 +4,9 @@ from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
 from vit.model import prepare_args
 
-NUM_SAMPLES = 1024
+NUM_SAMPLES = 32
 TOP_K = 5
-BATCH_SIZE = 16
+BATCH_SIZE = 4
 SAVE_DIR = "vit/results"
 
 
@@ -40,7 +40,7 @@ def main():
     # Monarch
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
-    config.attn_module_save_path = "vit/soba_params.pt"
+    config.attn_module_save_path = "vit/sparsemax_params.pt"
     config.num_steps = 3
     config.block_size = 14
     print(config.attention_type, prepare_args(config))
