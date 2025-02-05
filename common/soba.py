@@ -370,48 +370,36 @@ class SobaMonarchV2(nn.Module):
 
     def _mask(
         self,
-        left: Tensor,
         right: Tensor,
         valid_mask: Optional[Tensor],
         pad_amount: int,
-    ) -> Tuple[Tensor, Tensor]:
-        # left_flat = rearrange(left, "... j l k -> ... (l j) k")
+    ) -> Tensor:
         right_flat = rearrange(right, "... k j i -> ... j (k i)")
-
-        neg_inf = torch.finfo(left.dtype).min
+        neg_inf = torch.finfo(right_flat.dtype).min
 
         if valid_mask is not None:
             neg_inf_valid_mask = (1 - valid_mask) * neg_inf
 
         if self.pad_type == PadType.pre:
-            # left[..., :pad_amount, :] = neg_inf
-            right[..., :pad_amount] = neg_inf
+            right_flat[..., :pad_amount] += neg_inf
 
             if valid_mask is not None:
                 assert neg_inf_valid_mask is not None
-                # left_flat[..., pad_amount:, :] = left_flat[
-                #     ..., pad_amount:, :
-                # ] + neg_inf_valid_mask.transpose(-1, -2)
                 right_flat[..., pad_amount:] = (
                     right_flat[..., pad_amount:] + neg_inf_valid_mask
                 )
         else:
-            # left_flat[..., -pad_amount or left_flat.shape[-2] :, :] = neg_inf
-            right_flat[..., -pad_amount or right_flat.shape[-1] :] = neg_inf
+            right_flat[..., -pad_amount or right_flat.shape[-1] :] += neg_inf
 
             if valid_mask is not None:
                 assert neg_inf_valid_mask is not None
-                # left_flat[..., : -pad_amount or None, :] = left_flat[
-                #     ..., : -pad_amount or None, :
-                # ] + neg_inf_valid_mask.transpose(-1, -2)
                 right_flat[..., : -pad_amount or None] = (
                     right_flat[..., : -pad_amount or None] + neg_inf_valid_mask
                 )
 
-        # left = rearrange(left_flat, "... (l j) k -> ... j l k", j=self.block_size)
         right = rearrange(right_flat, "... j (k i) -> ... k j i", i=self.block_size)
 
-        return left, right
+        return right
 
     def _scaled_left_grad(
         self, left: Tensor, right: Tensor, query: Tensor, key: Tensor
@@ -452,25 +440,30 @@ class SobaMonarchV2(nn.Module):
         query = rearrange(query, "... (l j) v -> ... l j v", j=self.block_size)
         key = rearrange(key, "... (k i) v -> ... k i v", i=self.block_size)
 
-        left = torch.ones(
-            (batch_size, num_heads, self.block_size, num_blocks, num_blocks),
-            device=query.device,
+        left = (
+            torch.ones(
+                (batch_size, num_heads, self.block_size, num_blocks, num_blocks),
+                device=query.device,
+            )
+            / num_blocks
         )
-        right = torch.ones(
-            (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
-            device=query.device,
+        right = (
+            torch.ones(
+                (batch_size, num_heads, num_blocks, self.block_size, self.block_size),
+                device=query.device,
+            )
+            / self.block_size
         )
-
-        left, right = self._mask(left, right, valid_mask, pad_amount)
-        left = sparsemax(left, dim=-1)
+        right = self._mask(right, valid_mask, pad_amount)
         right = sparsemax(right, dim=-1)
 
-        for step in range(self.num_steps):
+        for _ in range(self.num_steps):
+
             right = right - self._scaled_right_grad(left, right, query, key)
-            left, right = self._mask(left, right, valid_mask, pad_amount)
+            right = self._mask(right, valid_mask, pad_amount)
             right = sparsemax(right, dim=-1)
+
             left = left - self._scaled_left_grad(left, right, query, key)
-            left, right = self._mask(left, right, valid_mask, pad_amount)
             left = sparsemax(left, dim=-1)
 
         return left, right

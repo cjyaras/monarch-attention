@@ -1,5 +1,5 @@
 # Pytorch save files
-.pt
+*.pt
 
 # Pickle files
 *.pkl

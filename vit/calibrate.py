@@ -5,7 +5,7 @@ import torch
 from tqdm.auto import tqdm
 
 from common.baselines import Softmax, Sparsemax
-from common.soba import PadType, SobaMonarch
+from common.soba import PadType, SobaMonarch, SobaMonarchV2
 from common.utils import get_device, maybe_compile
 from vit.config import get_config
 from vit.extract import extract_query_key
@@ -89,7 +89,7 @@ def calibrate_soba(
 
         query = query_per_layer[i]
         key = key_per_layer[i]
-        soba = SobaMonarch(
+        soba = SobaMonarchV2(
             block_size=14,
             num_steps=3,
             num_heads=config.num_attention_heads,
@@ -126,15 +126,17 @@ def calibrate_soba(
             soba.attention_scale.detach()
         )
 
-        soba_params[".".join([get_attn_module_path(i), "step_size"])] = (
-            soba.step_size.detach()
-        )
+        # soba_params[".".join([get_attn_module_path(i), "step_size"])] = (
+        #     soba.step_size.detach()
+        # )
 
     return soba_params
 
 
 SPARSEMAX_PARAMS_PATH = "vit/sparsemax_params.pt"
 SOBA_PARAMS_PATH = "vit/soba_params.pt"
+
+torch.autograd.set_detect_anomaly(True)
 
 
 def main():
