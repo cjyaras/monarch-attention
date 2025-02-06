@@ -1,4 +1,4 @@
-from typing import Optional, Tuple, Union
+from typing import Dict, Optional, Tuple, Union
 
 import torch
 from transformers.models.vit.modeling_vit import (
@@ -33,9 +33,9 @@ ATTENTION_TYPE_TO_MODULE = {
 }
 
 
-def prepare_args(config: CustomViTConfig) -> Tuple:
+def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tuple:
 
-    match config.attention_type:
+    match attention_type:
 
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
@@ -64,16 +64,21 @@ def prepare_args(config: CustomViTConfig) -> Tuple:
             return ()
 
         case _:
-            raise ValueError(f"Invalid attention type: {config.attention_type}")
+            raise ValueError(f"Invalid attention type: {attention_type}")
 
 
 class CustomViTSelfAttention(ViTSelfAttention):
 
-    def __init__(self, config: CustomViTConfig):
+    def __init__(self, layer_num: int, config: CustomViTConfig):
         super().__init__(config)
 
-        module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
-        self.attn_module = module(*prepare_args(config))
+        if isinstance(config.attention_type, Dict):
+            attention_type = config.attention_type[layer_num]
+            module = ATTENTION_TYPE_TO_MODULE[attention_type]
+            self.attn_module = module(*prepare_args(attention_type, config))
+        else:
+            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
+            self.attn_module = module(*prepare_args(config.attention_type, config))
 
         maybe_compile(self.attn_module)
 
@@ -111,8 +116,8 @@ class CustomViTModel(ViTModel):
         use_mask_token: bool = False,
     ):
         super().__init__(config, add_pooling_layer, use_mask_token)
-        for layer in self.encoder.layer:
-            layer.attention.attention = CustomViTSelfAttention(config)  # type: ignore
+        for layer_num, layer in enumerate(self.encoder.layer):
+            layer.attention.attention = CustomViTSelfAttention(layer_num, config)  # type: ignore
         self.post_init()
 
 

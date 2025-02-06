@@ -1,11 +1,9 @@
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 from transformers.models.roberta.modeling_roberta import (
     RobertaAttention,
-    RobertaForMaskedLM,
     RobertaForQuestionAnswering,
-    RobertaForSequenceClassification,
     RobertaModel,
     RobertaSelfAttention,
 )
@@ -27,9 +25,9 @@ ATTENTION_TYPE_TO_MODULE = {
 }
 
 
-def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
+def prepare_args(attention_type: AttentionType, config: CustomRobertaConfig) -> Tuple:
 
-    match config.attention_type:
+    match attention_type:
 
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
@@ -45,20 +43,20 @@ def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
                 config.pad_type,
             )
 
-        case AttentionType.hybrid:
-            return (
-                (
-                    config.block_size,
-                    config.num_steps,
-                    config.num_attention_heads,
-                    config.pad_type,
-                )
-                if layer_num in config.hybrid_attention_layers
-                else (config.num_attention_heads,)
-            )
+        case AttentionType.linformer:
+            return (config.rank, config.seq_len, config.share_kv)
+
+        case AttentionType.performer:
+            return (config.rank, config.estimator_type, config.ortho_features)
+
+        case AttentionType.nystromformer:
+            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
+
+        case AttentionType.cosformer:
+            return ()
 
         case _:
-            raise ValueError(f"Invalid attention type: {config.attention_type}")
+            raise ValueError(f"Invalid attention type: {attention_type}")
 
 
 class CustomRobertaSelfAttention(RobertaSelfAttention):
@@ -69,16 +67,14 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         assert self.position_embedding_type == "absolute"
         assert not self.is_decoder
 
-        if config.attention_type == AttentionType.hybrid:
-            module = (
-                SobaMonarchV2
-                if layer_num in config.hybrid_attention_layers
-                else Sparsemax
-            )
+        if isinstance(config.attention_type, Dict):
+            attention_type = config.attention_type[layer_num]
+            module = ATTENTION_TYPE_TO_MODULE[attention_type]
+            self.attn_module = module(*prepare_args(attention_type, config))
         else:
             module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
+            self.attn_module = module(*prepare_args(config.attention_type, config))
 
-        self.attn_module = module(*prepare_args(config, layer_num))
         maybe_compile(self.attn_module)
 
     # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
@@ -170,20 +166,6 @@ class CustomRobertaModel(RobertaModel):
     ) -> Tensor:
         assert not self.config.is_decoder
         return attention_mask  # Delegate the exact computation to the attention layer
-
-
-class CustomRobertaForMaskedLM(RobertaForMaskedLM):
-    def __init__(self, config: CustomRobertaConfig):
-        super().__init__(config)
-        self.roberta = CustomRobertaModel(config, add_pooling_layer=False)
-        self.post_init()
-
-
-class CustomRobertaForSequenceClassification(RobertaForSequenceClassification):
-    def __init__(self, config: CustomRobertaConfig):
-        super().__init__(config)
-        self.roberta = CustomRobertaModel(config, add_pooling_layer=False)
-        self.post_init()
 
 
 class CustomRobertaForQuestionAnswering(RobertaForQuestionAnswering):

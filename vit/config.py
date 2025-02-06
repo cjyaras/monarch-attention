@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Optional
+from typing import Dict, Optional, Union
 
 from transformers.models.vit.configuration_vit import ViTConfig
 
@@ -19,7 +19,9 @@ class AttentionType(StrEnum):
 class CustomViTConfig(ViTConfig):
     def __init__(
         self,
-        attention_type: AttentionType = AttentionType.softmax,
+        attention_type: Union[
+            AttentionType, Dict[int, AttentionType]
+        ] = AttentionType.softmax,
         attn_module_save_path: Optional[str] = None,
         enable_flash_attention: bool = False,
         num_steps: Optional[int] = None,

@@ -128,15 +128,10 @@ def calibrate_soba(
             soba.attention_scale.detach()
         )
 
-        soba_params[".".join([get_attn_module_path(i), "step_size"])] = (
-            soba.step_size.detach()
-        )
-
     return soba_params
 
 
 SPARSEMAX_PARAMS_PATH = "roberta/sparsemax_params.pt"
-SOBA_PARAMS_PATH = "roberta/soba_params.pt"
 
 
 def main():
@@ -145,15 +140,6 @@ def main():
             learning_rate=0.1, num_steps=500, num_samples=8
         )
         torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
-
-    # if not os.path.exists(SOBA_PARAMS_PATH):
-    #     soba_params = calibrate_soba(
-    #         learning_rate=0.1,
-    #         num_steps=500,
-    #         params_path=SPARSEMAX_PARAMS_PATH,
-    #         num_samples=8,
-    #     )
-    #     torch.save(soba_params, SOBA_PARAMS_PATH)
 
 
 if __name__ == "__main__":

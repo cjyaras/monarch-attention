@@ -2,7 +2,6 @@ import torch
 
 from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
-from vit.model import prepare_args
 
 NUM_SAMPLES = 1024
 TOP_K = 5
@@ -23,19 +22,15 @@ def main():
     config = get_config()
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
-    print(config.attention_type, prepare_args(config))
-    # print(evaluator.evaluate(config))
-    # evaluator.evaluate_and_save(config)
+    print(config.attention_type)
+    evaluator.evaluate_and_save(config)
 
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax
     config.attn_module_save_path = "vit/sparsemax_params.pt"
-    print(config.attention_type, prepare_args(config))
-    # print(evaluator.evaluate(config))
-    # evaluator.evaluate_and_save(config)
-
-    # return
+    print(config.attention_type)
+    evaluator.evaluate_and_save(config)
 
     # Monarch
     config = get_config()
@@ -43,22 +38,15 @@ def main():
     config.attn_module_save_path = "vit/sparsemax_params.pt"
     config.num_steps = 3
     config.block_size = 14
-    print(config.attention_type, prepare_args(config))
-    print(evaluator.evaluate(config))
-    # evaluator.evaluate_and_save(config)
-
-    return
+    evaluator.evaluate_and_save(config)
 
     # Linformer
     config = get_config()
     config.attention_type = AttentionType.linformer
     config.rank = 64
     config.share_kv = False
-    print(config.attention_type, prepare_args(config))
-    print(evaluator.evaluate(config))
-    # evaluator.evaluate_and_save(config)
-
-    exit()
+    print(config.attention_type)
+    evaluator.evaluate_and_save(config)
 
     # Performer
     config = get_config()
@@ -66,7 +54,7 @@ def main():
     config.rank = 64
     config.estimator_type = "trig"
     config.ortho_features = False
-    print(config.attention_type, prepare_args(config))
+    print(config.attention_type)
     evaluator.evaluate_and_save(config)
 
     # Nystromformer
@@ -74,13 +62,13 @@ def main():
     config.attention_type = AttentionType.nystromformer
     config.rank = 64
     config.conv_kernel_size = None
-    print(config.attention_type, prepare_args(config))
+    print(config.attention_type)
     evaluator.evaluate_and_save(config)
 
     # Cosformer
     config = get_config()
     config.attention_type = AttentionType.cosformer
-    print(config.attention_type, prepare_args(config))
+    print(config.attention_type)
     evaluator.evaluate_and_save(config)
 
 

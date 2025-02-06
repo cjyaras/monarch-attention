@@ -1,9 +1,10 @@
 from enum import StrEnum
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
 from common.soba import PadType
+from roberta.data import MAX_LENGTH
 
 
 class AttentionType(StrEnum):
@@ -20,12 +21,19 @@ class AttentionType(StrEnum):
 class CustomRobertaConfig(RobertaConfig):
     def __init__(
         self,
-        attention_type: AttentionType = AttentionType.softmax,
+        attention_type: Union[
+            AttentionType, Dict[int, AttentionType]
+        ] = AttentionType.softmax,
         attn_module_save_path: Optional[str] = None,
         enable_flash_attention: bool = False,
         num_steps: Optional[int] = None,
+        rank: Optional[int] = None,
         block_size: Optional[int] = None,
         pad_type: PadType = PadType.pre,
+        share_kv: bool = False,
+        estimator_type: str = "pos",
+        ortho_features: bool = True,
+        conv_kernel_size: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -42,8 +50,23 @@ class CustomRobertaConfig(RobertaConfig):
         self.block_size = block_size
         self.pad_type = pad_type
 
-        # Hybrid
-        self.hybrid_attention_layers: List[int] = []
+        # Linformer
+        # self.rank used as projection dim
+        self.rank = rank
+        self.share_kv = share_kv
+
+        # Compute sequence length
+        assert isinstance(self.image_size, int) and isinstance(self.patch_size, int)
+        self.seq_len = MAX_LENGTH
+
+        # Performer
+        # self.rank used as num_samples
+        self.estimator_type = estimator_type
+        self.ortho_features = ortho_features
+
+        # Nystromformer
+        # self.rank used as number of landmarks
+        self.conv_kernel_size = conv_kernel_size
 
         # Set _attn_implementation to eager to override attention_mask logic in RobertaModel
         self._attn_implementation = "eager"

@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 
 from evaluate import ImageClassificationEvaluator
 
@@ -28,9 +28,9 @@ class CustomImageClassificationEvaluator(ImageClassificationEvaluator):
 
 class Evaluator:
 
-    def __init__(self, num_samples: int, top_k: int, batch_size: int, save_dir: str):
-        self.num_samples = num_samples
-        self.top_k = top_k
+    def __init__(
+        self, num_samples: Optional[int], top_k: int, batch_size: int, save_dir: str
+    ):
         self.batch_size = batch_size
         self.dataset = get_dataset(num_samples=num_samples)
         self.metric = TopKAccuracy()
