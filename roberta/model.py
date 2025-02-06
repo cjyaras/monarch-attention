@@ -12,7 +12,7 @@ from transformers.models.roberta.modeling_roberta import (
 from transformers.utils.logging import ERROR, set_verbosity
 
 from common.baselines import Softmax, Sparsemax
-from common.soba import SobaMonarch
+from common.soba import SobaMonarch, SobaMonarchV2
 from common.utils import get_device, maybe_compile
 from roberta.config import AttentionType, CustomRobertaConfig
 
@@ -23,11 +23,11 @@ Tensor = torch.Tensor
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
     AttentionType.sparsemax: Sparsemax,
-    AttentionType.soba_monarch: SobaMonarch,
+    AttentionType.soba_monarch: SobaMonarchV2,
 }
 
 
-def prepare_args(config: CustomRobertaConfig) -> Tuple:
+def prepare_args(config: CustomRobertaConfig, layer_num: int) -> Tuple:
 
     match config.attention_type:
 
@@ -45,6 +45,18 @@ def prepare_args(config: CustomRobertaConfig) -> Tuple:
                 config.pad_type,
             )
 
+        case AttentionType.hybrid:
+            return (
+                (
+                    config.block_size,
+                    config.num_steps,
+                    config.num_attention_heads,
+                    config.pad_type,
+                )
+                if layer_num in config.hybrid_attention_layers
+                else (config.num_attention_heads,)
+            )
+
         case _:
             raise ValueError(f"Invalid attention type: {config.attention_type}")
 
@@ -57,9 +69,16 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         assert self.position_embedding_type == "absolute"
         assert not self.is_decoder
 
-        module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
+        if config.attention_type == AttentionType.hybrid:
+            module = (
+                SobaMonarchV2
+                if layer_num in config.hybrid_attention_layers
+                else Sparsemax
+            )
+        else:
+            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
 
-        self.attn_module = module(*prepare_args(config))
+        self.attn_module = module(*prepare_args(config, layer_num))
         maybe_compile(self.attn_module)
 
     # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint

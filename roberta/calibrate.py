@@ -146,14 +146,14 @@ def main():
         )
         torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
 
-    if not os.path.exists(SOBA_PARAMS_PATH):
-        soba_params = calibrate_soba(
-            learning_rate=0.1,
-            num_steps=500,
-            params_path=SPARSEMAX_PARAMS_PATH,
-            num_samples=8,
-        )
-        torch.save(soba_params, SOBA_PARAMS_PATH)
+    # if not os.path.exists(SOBA_PARAMS_PATH):
+    #     soba_params = calibrate_soba(
+    #         learning_rate=0.1,
+    #         num_steps=500,
+    #         params_path=SPARSEMAX_PARAMS_PATH,
+    #         num_samples=8,
+    #     )
+    #     torch.save(soba_params, SOBA_PARAMS_PATH)
 
 
 if __name__ == "__main__":

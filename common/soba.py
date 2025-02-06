@@ -458,7 +458,6 @@ class SobaMonarchV2(nn.Module):
         right = sparsemax(right, dim=-1)
 
         for _ in range(self.num_steps):
-
             right = right - self._scaled_right_grad(left, right, query, key)
             right = self._mask(right, valid_mask, pad_amount)
             right = sparsemax(right, dim=-1)

@@ -4,9 +4,9 @@ from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
 from vit.model import prepare_args
 
-NUM_SAMPLES = 32
+NUM_SAMPLES = 1024
 TOP_K = 5
-BATCH_SIZE = 4
+BATCH_SIZE = 16
 SAVE_DIR = "vit/results"
 
 
@@ -32,7 +32,7 @@ def main():
     config.attention_type = AttentionType.sparsemax
     config.attn_module_save_path = "vit/sparsemax_params.pt"
     print(config.attention_type, prepare_args(config))
-    print(evaluator.evaluate(config))
+    # print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
     # return
@@ -55,7 +55,10 @@ def main():
     config.rank = 64
     config.share_kv = False
     print(config.attention_type, prepare_args(config))
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
+
+    exit()
 
     # Performer
     config = get_config()

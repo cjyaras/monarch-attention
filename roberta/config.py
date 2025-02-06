@@ -10,6 +10,7 @@ class AttentionType(StrEnum):
     softmax = "softmax"
     sparsemax = "sparsemax"
     soba_monarch = "soba-monarch"
+    hybrid = "hybrid"
     linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
@@ -40,6 +41,9 @@ class CustomRobertaConfig(RobertaConfig):
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type
+
+        # Hybrid
+        self.hybrid_attention_layers: List[int] = []
 
         # Set _attn_implementation to eager to override attention_mask logic in RobertaModel
         self._attn_implementation = "eager"

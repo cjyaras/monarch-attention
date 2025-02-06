@@ -142,14 +142,14 @@ torch.autograd.set_detect_anomaly(True)
 def main():
     if not os.path.exists(SPARSEMAX_PARAMS_PATH):
         sparsemax_params = calibrate_sparsemax(
-            learning_rate=0.1, num_steps=500, num_samples=8
+            learning_rate=0.1, num_steps=50, num_samples=8
         )
         torch.save(sparsemax_params, SPARSEMAX_PARAMS_PATH)
 
     if not os.path.exists(SOBA_PARAMS_PATH):
         soba_params = calibrate_soba(
             learning_rate=0.1,
-            num_steps=500,
+            num_steps=50,
             params_path=SPARSEMAX_PARAMS_PATH,
             num_samples=8,
         )
