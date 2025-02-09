@@ -21,7 +21,7 @@ class Logger:
         file_name = generate_random_file_name()
         save_path = os.path.join(self.save_folder, file_name)
         with open(save_path, "w") as f:
-            json.dump({"config": config.to_dict(), "result": result}, f)
+            json.dump({"attention_type": config.attention_type, "result": result}, f)
 
         return file_name
 

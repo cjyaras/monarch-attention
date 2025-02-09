@@ -10,7 +10,7 @@ from transformers.models.roberta.modeling_roberta import (
 from transformers.utils.logging import ERROR, set_verbosity
 
 from common.baselines import Softmax, Sparsemax
-from common.soba import SobaMonarch, SobaMonarchV2
+from common.soba import SobaMonarch
 from common.utils import get_device, maybe_compile
 from roberta.config import AttentionType, CustomRobertaConfig
 
@@ -21,7 +21,7 @@ Tensor = torch.Tensor
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
     AttentionType.sparsemax: Sparsemax,
-    AttentionType.soba_monarch: SobaMonarchV2,
+    AttentionType.soba_monarch: SobaMonarch,
 }
 
 

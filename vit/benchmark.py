@@ -25,6 +25,8 @@ def main():
     print(config.attention_type)
     evaluator.evaluate_and_save(config)
 
+    return
+
     # Sparsemax
     config = get_config()
     config.attention_type = AttentionType.sparsemax

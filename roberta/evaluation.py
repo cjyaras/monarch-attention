@@ -18,7 +18,6 @@ class CustomQuestionAnsweringEvaluator(QuestionAnsweringEvaluator):
 class Evaluator:
 
     def __init__(self, num_samples: int, batch_size: int, save_dir: str):
-        self.num_samples = num_samples
         self.batch_size = batch_size
         self.dataset = get_dataset(num_samples=num_samples)
         self.evaluator = CustomQuestionAnsweringEvaluator()

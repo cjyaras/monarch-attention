@@ -56,7 +56,6 @@ class CustomRobertaConfig(RobertaConfig):
         self.share_kv = share_kv
 
         # Compute sequence length
-        assert isinstance(self.image_size, int) and isinstance(self.patch_size, int)
         self.seq_len = MAX_LENGTH
 
         # Performer

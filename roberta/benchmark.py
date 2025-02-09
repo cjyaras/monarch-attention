@@ -3,8 +3,8 @@ import torch
 from roberta.config import AttentionType, get_config
 from roberta.evaluation import Evaluator
 
-NUM_SAMPLES = 1024
-BATCH_SIZE = 16
+NUM_SAMPLES = 4
+BATCH_SIZE = 4
 SAVE_DIR = "roberta/results"
 
 
@@ -32,6 +32,8 @@ def main():
     config.enable_flash_attention = False
     print(config.attention_type)
     evaluator.evaluate_and_save(config)
+
+    return
 
     # Sparsemax
     config = get_config()
