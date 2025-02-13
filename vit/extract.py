@@ -73,17 +73,3 @@ def extract_query_key(
     ).transpose(1, 0)
 
     return query, key
-
-
-if __name__ == "__main__":
-    import numpy as np
-
-    from vit.config import get_config
-
-    config = get_config()
-
-    query, key = extract_query_key(
-        config, num_samples=1, batch_size=1, split="validation"
-    )
-    np.save("query_softmax.npy", query.cpu().numpy())
-    np.save("key_softmax.npy", key.cpu().numpy())

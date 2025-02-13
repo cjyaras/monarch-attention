@@ -33,21 +33,11 @@ def main():
     print(config.attention_type)
     evaluator.evaluate_and_save(config)
 
-    return
-
-    # Sparsemax
-    config = get_config()
-    config.attention_type = AttentionType.sparsemax
-    config.attn_module_save_path = "roberta/sparsemax_params.pt"
-    print(config.attention_type)
-    evaluator.evaluate_and_save(config)
-
     # Monarch
     config = get_config()
     config.attention_type = get_mixed_type(
-        AttentionType.soba_monarch, AttentionType.sparsemax
+        AttentionType.soba_monarch, AttentionType.softmax
     )
-    config.attn_module_save_path = "roberta/sparsemax_params.pt"
     config.num_steps = 3
     config.block_size = 14
     evaluator.evaluate_and_save(config)

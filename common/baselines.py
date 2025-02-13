@@ -8,8 +8,6 @@ import torch.nn.functional as F
 from einops import rearrange
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
 
-from common.activations import sparsemax
-
 Tensor = torch.Tensor
 
 
@@ -90,74 +88,6 @@ class Softmax(nn.Module):
 
             attention_probs = F.softmax(attention_scores, dim=-1)
             return torch.matmul(attention_probs, value)
-
-
-class Sparsemax(nn.Module):
-
-    def __init__(self, num_heads: int):
-        super().__init__()
-        self.attention_scale = nn.Parameter(torch.zeros((num_heads,)))
-
-    def get_matrix(
-        self,
-        query: Tensor,
-        key: Tensor,
-        attention_mask: Optional[Tensor] = None,
-    ) -> Tensor:
-
-        assert query.shape == key.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape
-        if attention_mask is not None:
-            assert attention_mask.shape == (batch_size, seq_len)
-
-        attention_mask = (
-            ((1.0 - attention_mask[:, None, None, :]) * torch.finfo(query.dtype).min)
-            if attention_mask is not None
-            else None
-        )
-
-        attention_scores = torch.matmul(query, key.transpose(-1, -2))
-        attention_scores = attention_scores / sqrt(head_dim)
-        attention_scores = attention_scores * torch.nn.functional.softplus(
-            self.attention_scale[..., None, None]
-        )
-
-        if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask
-
-        attention_probs = sparsemax(attention_scores, dim=-1)
-        return attention_probs
-
-    def forward(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attention_mask: Optional[Tensor] = None,
-    ) -> Tensor:
-
-        assert query.shape == key.shape and key.shape == value.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape
-        if attention_mask is not None:
-            assert attention_mask.shape == (batch_size, seq_len)
-
-        attention_mask = (
-            ((1.0 - attention_mask[:, None, None, :]) * torch.finfo(query.dtype).min)
-            if attention_mask is not None
-            else None
-        )
-
-        attention_scores = torch.matmul(query, key.transpose(-1, -2))
-        attention_scores = attention_scores / sqrt(head_dim)
-        attention_scores = attention_scores * torch.exp(
-            self.attention_scale[..., None, None]
-        )
-
-        if attention_mask is not None:
-            attention_scores = attention_scores + attention_mask
-
-        attention_probs = sparsemax(attention_scores, dim=-1)
-        return torch.matmul(attention_probs, value)
 
 
 class Linformer(nn.Module):

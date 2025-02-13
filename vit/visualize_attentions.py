@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 import torch
 
 from common.baselines import Softmax
-from common.soba import InitType, PadType, SobaMonarchSoftmax
+from common.soba import InitType, PadType, SobaMonarch
 from vit.config import get_config
 from vit.extract import extract_query_key
 from vit.model import AttentionType
@@ -31,11 +31,7 @@ def main():
     head = 5
 
     softmax = Softmax()
-
-    soba_monarch = SobaMonarchSoftmax(14, 2, PadType.pre, InitType.eye)
-
-    # query = query[[0], layer, :, 1:]
-    # key = key[[0], layer, :, 1:]
+    soba_monarch = SobaMonarch(14, 2, PadType.pre, InitType.eye)
 
     query = query[[0], layer]
     key = key[[0], layer]
@@ -44,7 +40,6 @@ def main():
     soba_monarch_matrix = soba_monarch.get_matrix(query, key)[0, head]
 
     fig, ax = plt.subplots(1, 2)
-
     ax[0].imshow(softmax_matrix)
     ax[1].imshow(soba_monarch_matrix)
     plt.show()

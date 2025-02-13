@@ -9,7 +9,6 @@ from roberta.data import MAX_LENGTH
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    sparsemax = "sparsemax"
     soba_monarch = "soba-monarch"
     hybrid = "hybrid"
     linformer = "linformer"
@@ -24,7 +23,6 @@ class CustomRobertaConfig(RobertaConfig):
         attention_type: Union[
             AttentionType, Dict[int, AttentionType]
         ] = AttentionType.softmax,
-        attn_module_save_path: Optional[str] = None,
         enable_flash_attention: bool = False,
         num_steps: Optional[int] = None,
         rank: Optional[int] = None,
@@ -39,12 +37,9 @@ class CustomRobertaConfig(RobertaConfig):
     ):
         super().__init__(**kwargs)
         self.attention_type = attention_type
-        self.attn_module_save_path = attn_module_save_path
 
         # Softmax
         self.enable_flash_attention = enable_flash_attention
-
-        # Sparsemax: none
 
         # SobaMonarch
         self.num_steps = num_steps
