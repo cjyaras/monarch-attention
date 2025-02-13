@@ -41,6 +41,7 @@ def prepare_args(attention_type: AttentionType, config: CustomRobertaConfig) -> 
                 config.num_steps,
                 config.num_attention_heads,
                 config.pad_type,
+                config.init_type,
             )
 
         case AttentionType.linformer:

@@ -5,8 +5,7 @@ import torch
 from tqdm.auto import tqdm
 
 from common.baselines import Softmax, Sparsemax
-from common.soba import PadType, SobaMonarch
-from common.utils import get_device, maybe_compile
+from common.utils import get_device
 from roberta.config import get_config
 from roberta.extract import extract_query_key_mask
 
@@ -63,72 +62,6 @@ def calibrate_sparsemax(
         )
 
     return sparsemax_params
-
-
-def calibrate_soba(
-    learning_rate: float,
-    num_steps: int,
-    params_path: str,
-    num_samples: Optional[int] = None,
-) -> Params:
-
-    device = get_device()
-    config = get_config()
-
-    all_query, all_key, attention_mask = extract_query_key_mask(
-        config, num_samples=num_samples, split="train"
-    )
-    query_per_layer = torch.unbind(all_query.transpose(1, 0))
-    key_per_layer = torch.unbind(all_key.transpose(1, 0))
-
-    sparsemax_params = torch.load(params_path, weights_only=True)
-
-    softmax = Softmax().to(device)
-    soba_params = {}
-
-    for i in (pbar := tqdm(range(config.num_hidden_layers))):
-        pbar.set_description(f"Layer {i}")
-
-        query = query_per_layer[i]
-        key = key_per_layer[i]
-        soba = SobaMonarch(
-            block_size=14,
-            num_steps=3,
-            num_heads=config.num_attention_heads,
-            pad_type=PadType.pre,
-        ).to(device)
-        maybe_compile(soba)
-
-        soba.load_state_dict(
-            {
-                k.split(".")[-1]: v
-                for k, v in sparsemax_params.items()
-                if str(i) in k and "attn_module" in k
-            },
-            strict=False,
-        )
-
-        for k, v in soba.named_parameters():
-            v.requires_grad = True
-
-        trainable_params = filter(lambda p: p.requires_grad, soba.parameters())
-
-        optimizer = torch.optim.Adam(trainable_params, lr=learning_rate)
-
-        for _ in (pbar2 := tqdm(range(num_steps), leave=True)):
-            optimizer.zero_grad()
-            softmax_out = softmax.get_matrix(query, key, attention_mask=attention_mask)
-            soba_out = soba.get_matrix(query, key, attention_mask=attention_mask)
-            loss = kl_div(soba_out, softmax_out)
-            loss.backward()
-            optimizer.step()
-            pbar2.set_description(f"Loss: {loss.item():0.2e}")
-
-        soba_params[".".join([get_attn_module_path(i), "attention_scale"])] = (
-            soba.attention_scale.detach()
-        )
-
-    return soba_params
 
 
 SPARSEMAX_PARAMS_PATH = "roberta/sparsemax_params.pt"

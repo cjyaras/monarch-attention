@@ -22,6 +22,7 @@ def _compute_lambda(alpha: Tensor, beta: Tensor) -> Tensor:
         torch.sum(1 + beta_sort * inv_alpha_cum_sum > z_cum_sum, dim=-1, keepdim=True)
         - 1
     )
+    k = torch.maximum(k, torch.zeros_like(k))
     lam = (torch.take_along_dim(z_cum_sum, k, dim=-1) - 1) / torch.take_along_dim(
         inv_alpha_cum_sum, k, dim=-1
     )
@@ -34,7 +35,7 @@ def minimize_scsq(alpha: Tensor, beta: Tensor) -> Tensor:
     zero_mask = torch.isclose(alpha, torch.zeros_like(alpha))
     positive_mask = torch.logical_not(zero_mask)
     lam = _compute_lambda(
-        torch.where(positive_mask, alpha, 1),
+        torch.where(positive_mask, alpha, 1.0),
         torch.where(positive_mask, beta, torch.finfo(beta.dtype).min),
     )
     smallest_idx = torch.argmax(

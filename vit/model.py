@@ -16,7 +16,7 @@ from common.baselines import (
     Softmax,
     Sparsemax,
 )
-from common.soba import SobaMonarch
+from common.soba import SobaMonarchSoftmax
 from common.utils import get_device, maybe_compile
 from vit.config import AttentionType, CustomViTConfig
 
@@ -25,7 +25,7 @@ set_verbosity(ERROR)
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
     AttentionType.sparsemax: Sparsemax,
-    AttentionType.soba_monarch: SobaMonarch,
+    AttentionType.soba_monarch: SobaMonarchSoftmax,
     AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
@@ -47,8 +47,8 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
             return (
                 config.block_size,
                 config.num_steps,
-                config.num_attention_heads,
                 config.pad_type,
+                config.init_type,
             )
 
         case AttentionType.linformer:
