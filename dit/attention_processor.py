@@ -129,7 +129,7 @@ class Attention(nn.Module):
         super().__init__()
 
         # To prevent circular import.
-        from .normalization import FP32LayerNorm, LpNorm, RMSNorm
+        from diffusers.models.normalization import FP32LayerNorm, LpNorm, RMSNorm
 
         self.inner_dim = out_dim if out_dim is not None else dim_head * heads
         self.inner_kv_dim = self.inner_dim if kv_heads is None else dim_head * kv_heads
@@ -856,7 +856,7 @@ class SanaMultiscaleLinearAttention(nn.Module):
         super().__init__()
 
         # To prevent circular import
-        from .normalization import get_normalization
+        from diffusers.models.normalization import get_normalization
 
         self.eps = eps
         self.attention_head_dim = attention_head_dim
@@ -922,7 +922,7 @@ class MochiAttention(nn.Module):
         eps: float = 1e-5,
     ):
         super().__init__()
-        from .normalization import MochiRMSNorm
+        from diffusers.models.normalization import MochiRMSNorm
 
         self.inner_dim = out_dim if out_dim is not None else dim_head * heads
         self.out_dim = out_dim if out_dim is not None else query_dim
@@ -5520,7 +5520,7 @@ class SD3IPAdapterJointAttnProcessor2_0(torch.nn.Module):
         super().__init__()
 
         # To prevent circular import
-        from .normalization import AdaLayerNorm, RMSNorm
+        from diffusers.models.normalization import AdaLayerNorm, RMSNorm
 
         self.norm_ip = AdaLayerNorm(timesteps_emb_dim, output_dim=ip_hidden_states_dim * 2, norm_eps=1e-6, chunk_dim=1)
         self.to_k_ip = nn.Linear(ip_hidden_states_dim, hidden_size, bias=False)
