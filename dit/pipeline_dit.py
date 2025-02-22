@@ -42,7 +42,7 @@ class DiTPipeline(DiffusionPipeline):
 
     def __init__(
         self,
-        transformer: Union[DiTTransformer2DModel, CustomDiTTransformer2DModel], # Changed from just DiTTransformer2DModel
+        transformer: DiTTransformer2DModel,
         vae: AutoencoderKL,
         scheduler: KarrasDiffusionSchedulers,
         id2label: Optional[Dict[int, str]] = None,

@@ -6,6 +6,7 @@ from torch import nn
 
 from .model import DiTTransformer2DModel
 from .custom_attention import CustomBasicTransformerBlock
+from .custom_attention_processor import EfficientAttnConfig
 
 class CustomDiTTransformer2DModel(DiTTransformer2DModel):
     """
@@ -14,6 +15,7 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
 
     def __init__(
         self,
+        efficient_attention_config: EfficientAttnConfig,
         num_attention_heads: int = 16,
         attention_head_dim: int = 72,
         in_channels: int = 4,
@@ -29,8 +31,7 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
         upcast_attention: bool = False,
         norm_type: str = "ada_norm_zero",
         norm_elementwise_affine: bool = False,
-        norm_eps: float = 1e-5,
-        efficient_attention_type: str = None
+        norm_eps: float = 1e-5
     ):
         
         super().__init__(
@@ -52,12 +53,13 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
             norm_eps
         )
 
-        assert efficient_attention_type in ["softmax", "soba", "linformer", "cosformer", "nystromformer", "performer"]
+        assert efficient_attention_config.efficient_attention_type in ["softmax", "soba", "linformer", "cosformer", "nystromformer", "performer"]
 
         # Change to custom Transformer blocks which allows for efficient attention modules
         self.transformer_blocks = nn.ModuleList(
             [
                 CustomBasicTransformerBlock(
+                    efficient_attention_config,
                     self.inner_dim,
                     self.config.num_attention_heads,
                     self.config.attention_head_dim,
@@ -68,8 +70,7 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
                     upcast_attention=self.config.upcast_attention,
                     norm_type=norm_type,
                     norm_elementwise_affine=self.config.norm_elementwise_affine,
-                    norm_eps=self.config.norm_eps,
-                    efficient_attention_type=efficient_attention_type
+                    norm_eps=self.config.norm_eps
                 )
                 for _ in range(self.config.num_layers)
             ]

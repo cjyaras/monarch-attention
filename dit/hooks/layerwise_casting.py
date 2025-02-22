@@ -7,7 +7,7 @@ from typing import Optional, Tuple, Type, Union
 
 import torch
 
-from diffuers.utils import get_logger, is_peft_available, is_peft_version
+from diffusers.utils import get_logger, is_peft_available, is_peft_version
 from .hooks import HookRegistry, ModelHook
 
 

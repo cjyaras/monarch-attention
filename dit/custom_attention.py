@@ -5,23 +5,17 @@ import torch.nn.functional as F
 from torch import nn
 
 from .attention import BasicTransformerBlock
-from .custom_attention_processor import SobaMonarchAttnProcessor, LinformerAttnProcessor, CosformerAttnProcessor, PerformerAttnProcessor, NystromformerAttnProcessor
+from .custom_attention_processor import EfficientAttnProcessor, EfficientAttnConfig #SobaMonarchAttnProcessor, LinformerAttnProcessor, CosformerAttnProcessor, PerformerAttnProcessor, NystromformerAttnProcessor
 
-from ..common.soba import *
-from ..common.baselines import *
+from common.soba import *
+from common.baselines import *
 
-ATTENTION_TYPE_TO_MODULE = {
-            "soba": SobaMonarchAttnProcessor,
-            "linformer": LinformerAttnProcessor,
-            "cosformer": CosformerAttnProcessor,
-            "performer": PerformerAttnProcessor,
-            "nystromformer": NystromformerAttnProcessor
-        }
 
 
 class CustomBasicTransformerBlock(BasicTransformerBlock):
     def __init__(
         self,
+        efficient_attention_config: EfficientAttnConfig,
         dim: int,
         num_attention_heads: int,
         attention_head_dim: int,
@@ -44,8 +38,7 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
         ada_norm_bias: Optional[int] = None,
         ff_inner_dim: Optional[int] = None,
         ff_bias: bool = True,
-        attention_out_bias: bool = True,
-        efficient_attention_type: str = "softmax"
+        attention_out_bias: bool = True
     ):
         
         super().__init__(
@@ -74,11 +67,10 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
             attention_out_bias
         )
 
-        assert efficient_attention_type in ["softmax", "soba", "linformer", "performer", "nystromformer", "cosformer"]
-        if efficient_attention_type != "softmax":
+        assert efficient_attention_config.efficient_attention_type in ["softmax", "soba", "linformer", "performer", "nystromformer", "cosformer"]
+        if efficient_attention_config.efficient_attention_type != "softmax":
             # Modify attentions
-            efficient_attention_processor = ATTENTION_TYPE_TO_MODULE[efficient_attention_type]
-            self.attn1.set_processor(efficient_attention_processor) 
+            self.attn1.set_processor(EfficientAttnProcessor(efficient_attention_config)) 
 
             if cross_attention_dim is not None or double_self_attention:
-                self.attn2.set_processor(efficient_attention_processor)
+                self.attn2.set_processor(EfficientAttnProcessor(efficient_attention_config))

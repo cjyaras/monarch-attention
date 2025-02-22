@@ -28,7 +28,7 @@ from torch import Tensor, nn
 from typing_extensions import Self
 
 from diffusers import __version__
-from .hooks import apply_group_offloading, apply_layerwise_casting
+from dit.hooks import apply_group_offloading, apply_layerwise_casting
 from diffusers.quantizers import DiffusersAutoQuantizer, DiffusersQuantizer
 from diffusers.quantizers.quantization_config import QuantizationMethod
 from diffusers.utils import (
@@ -116,7 +116,7 @@ if is_accelerate_available():
 
 
 def get_parameter_device(parameter: torch.nn.Module) -> torch.device:
-    from ..hooks.group_offloading import _get_group_onload_device
+    from dit.hooks.group_offloading import _get_group_onload_device
 
     try:
         # Try to get the onload device from the group offloading hook
@@ -494,7 +494,7 @@ class ModelMixin(torch.nn.Module, PushToHubMixin):
 
         user_provided_patterns = True
         if skip_modules_pattern is None:
-            from ..hooks.layerwise_casting import DEFAULT_SKIP_MODULES_PATTERN
+            from dit.hooks.layerwise_casting import DEFAULT_SKIP_MODULES_PATTERN
 
             skip_modules_pattern = DEFAULT_SKIP_MODULES_PATTERN
             user_provided_patterns = False
@@ -1246,7 +1246,7 @@ class ModelMixin(torch.nn.Module, PushToHubMixin):
     # Adapted from `transformers`.
     @wraps(torch.nn.Module.cuda)
     def cuda(self, *args, **kwargs):
-        from ..hooks.group_offloading import _is_group_offload_enabled
+        from dit.hooks.group_offloading import _is_group_offload_enabled
 
         # Checks if the model has been loaded in 4-bit or 8-bit with BNB
         if getattr(self, "quantization_method", None) == QuantizationMethod.BITS_AND_BYTES:
@@ -1273,7 +1273,7 @@ class ModelMixin(torch.nn.Module, PushToHubMixin):
     # Adapted from `transformers`.
     @wraps(torch.nn.Module.to)
     def to(self, *args, **kwargs):
-        from ..hooks.group_offloading import _is_group_offload_enabled
+        from dit.hooks.group_offloading import _is_group_offload_enabled
 
         device_arg_or_kwarg_present = any(isinstance(arg, torch.device) for arg in args) or "device" in kwargs
         dtype_present_in_args = "dtype" in kwargs
