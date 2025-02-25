@@ -230,34 +230,36 @@ class SobaMonarch(nn.Module):
 
         left = torch.where(left_mask, left, 0.0)
 
-        for _ in range(self.num_steps):
+        for step in range(self.num_steps):
 
-            # Right
-            beta = torch.einsum("...jlk,...ljv,...kiv->...kji", left, query, key)
-            tau = repeat(torch.sum(left, dim=-2), "... j k -> ... k j 1")
-            right = F.softmax(
-                torch.where(
-                    torch.logical_and(
-                        right_mask,
-                        torch.logical_not(torch.isclose(tau, torch.zeros_like(tau))),
+            if step % 2 == 0:
+                beta = torch.einsum("...jlk,...ljv,...kiv->...kji", left, query, key)
+                tau = repeat(torch.sum(left, dim=-2), "... j k -> ... k j 1")
+                right = F.softmax(
+                    torch.where(
+                        torch.logical_and(
+                            right_mask,
+                            torch.logical_not(
+                                torch.isclose(tau, torch.zeros_like(tau))
+                            ),
+                        ),
+                        beta / tau,
+                        torch.finfo(beta.dtype).min,
                     ),
-                    beta / tau,
-                    torch.finfo(beta.dtype).min,
-                ),
-                dim=-1,
-            )
-            right = torch.where(right_mask, right, 0.0)
+                    dim=-1,
+                )
+                right = torch.where(right_mask, right, 0.0)
 
-            alpha = repeat(
-                torch.sum(torch.special.xlogy(right, right), dim=-1),
-                "... k j -> ... j 1 k",
-            )
-            beta = torch.einsum("...kji,...ljv,...kiv->...jlk", right, query, key)
-            left = F.softmax(
-                torch.where(left_mask, beta - alpha, torch.finfo(beta.dtype).min),
-                dim=-1,
-            )
-            left = torch.where(left_mask, left, 0.0)
-            print(torch.any(torch.isnan(left)))
+            else:
+                alpha = repeat(
+                    torch.sum(torch.special.xlogy(right, right), dim=-1),
+                    "... k j -> ... j 1 k",
+                )
+                beta = torch.einsum("...kji,...ljv,...kiv->...jlk", right, query, key)
+                left = F.softmax(
+                    torch.where(left_mask, beta - alpha, torch.finfo(beta.dtype).min),
+                    dim=-1,
+                )
+                left = torch.where(left_mask, left, 0.0)
 
         return left, right

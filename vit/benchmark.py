@@ -3,9 +3,9 @@ import torch
 from vit.config import AttentionType, get_config
 from vit.evaluation import Evaluator
 
-NUM_SAMPLES = 1024
+NUM_SAMPLES = 16
 TOP_K = 5
-BATCH_SIZE = 16
+BATCH_SIZE = 4
 SAVE_DIR = "vit/results"
 
 
@@ -23,14 +23,19 @@ def main():
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
     print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
 
     # Monarch
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
-    config.num_steps = 3
+    config.num_steps = 4
     config.block_size = 14
-    evaluator.evaluate_and_save(config)
+    print(config.attention_type)
+    print(print(evaluator.evaluate(config)))
+    # evaluator.evaluate_and_save(config)
+
+    return
 
     # Linformer
     config = get_config()

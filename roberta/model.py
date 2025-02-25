@@ -179,10 +179,4 @@ def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
     )
     model = model.to(device)  # type: ignore
     model.eval()
-
-    if config.attn_module_save_path is not None:
-        model.load_state_dict(
-            torch.load(config.attn_module_save_path, weights_only=True), strict=False
-        )
-
     return model

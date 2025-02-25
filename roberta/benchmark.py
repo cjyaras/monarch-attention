@@ -1,9 +1,9 @@
 import torch
 
-from roberta.config import AttentionType, get_config
+from roberta.config import AttentionType, InitType, get_config
 from roberta.evaluation import Evaluator
 
-NUM_SAMPLES = 4
+NUM_SAMPLES = 16
 BATCH_SIZE = 4
 SAVE_DIR = "roberta/results"
 
@@ -16,7 +16,8 @@ def main():
         save_dir=SAVE_DIR,
     )
 
-    efficient_attn_layers = [8, 9, 10, 11]
+    efficient_attn_layers = [0, 1, 2, 3, 8, 9, 10, 11]
+    # efficient_attn_layers = [5]
 
     def get_mixed_type(efficient_type, default_type):
         return {
@@ -31,16 +32,22 @@ def main():
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
     print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
 
     # Monarch
     config = get_config()
     config.attention_type = get_mixed_type(
         AttentionType.soba_monarch, AttentionType.softmax
     )
-    config.num_steps = 3
-    config.block_size = 14
-    evaluator.evaluate_and_save(config)
+    config.init_type = InitType.eye
+    config.num_steps = 5
+    config.block_size = 24
+    print(config.attention_type)
+    print(evaluator.evaluate(config))
+    # evaluator.evaluate_and_save(config)
+
+    return
 
     # Linformer
     config = get_config()
