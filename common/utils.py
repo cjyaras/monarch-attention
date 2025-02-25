@@ -6,7 +6,7 @@ from torch._prims_common import DeviceLikeType
 from transformers.image_processing_base import BatchFeature
 from transformers.tokenization_utils_base import BatchEncoding
 
-from common.baselines import Softmax, Sparsemax
+from common.baselines import Softmax #, Sparsemax
 
 T = TypeVar("T")
 
@@ -29,5 +29,5 @@ def get_device() -> DeviceLikeType:
 
 
 def maybe_compile(module: nn.Module, mode: str = "reduce-overhead"):
-    if torch.cuda.is_available() and not isinstance(module, (Softmax, Sparsemax)):
+    if torch.cuda.is_available() and not isinstance(module, Softmax): #, Sparsemax)):
         module.compile(mode=mode)

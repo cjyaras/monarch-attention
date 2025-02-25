@@ -258,6 +258,6 @@ class SobaMonarch(nn.Module):
                 dim=-1,
             )
             left = torch.where(left_mask, left, 0.0)
-            print(torch.any(torch.isnan(left)))
+            #print(torch.any(torch.isnan(left)))
 
         return left, right
