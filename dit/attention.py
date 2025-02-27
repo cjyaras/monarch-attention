@@ -62,12 +62,12 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
             attention_out_bias
         )
 
-        assert efficient_attention_config.efficient_attention_type in [AttentionType.softmax,
-                                                                       AttentionType.soba_monarch,
-                                                                       AttentionType.linformer,
-                                                                       AttentionType.performer,
-                                                                       AttentionType.nystromformer,
-                                                                       AttentionType.cosformer]
+        # assert efficient_attention_config.efficient_attention_type in [AttentionType.softmax,
+        #                                                                AttentionType.soba_monarch,
+        #                                                                AttentionType.linformer,
+        #                                                                AttentionType.performer,
+        #                                                                AttentionType.nystromformer,
+        #                                                                AttentionType.cosformer]
         
         self.attn1.set_processor(EfficientAttnProcessor(efficient_attention_config, layer_num)) 
         if cross_attention_dim is not None or double_self_attention:

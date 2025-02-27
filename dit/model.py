@@ -52,12 +52,13 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
             norm_eps
         )
 
-        assert efficient_attention_config.efficient_attention_type in [AttentionType.softmax, 
-                                                                       AttentionType.soba_monarch,
-                                                                       AttentionType.linformer,
-                                                                       AttentionType.performer,
-                                                                       AttentionType.nystromformer,
-                                                                       AttentionType.cosformer]
+        # if isinstance(efficient_attention_config.efficient_attention_type, AttentionType):
+        #     assert efficient_attention_config.efficient_attention_type in [AttentionType.softmax, 
+        #                                                                     AttentionType.soba_monarch,
+        #                                                                     AttentionType.linformer,
+        #                                                                     AttentionType.performer,
+        #                                                                     AttentionType.nystromformer,
+        #                                                                     AttentionType.cosformer]
 
         # Change to custom Transformer blocks which allows for efficient attention modules
         self.transformer_blocks = nn.ModuleList(

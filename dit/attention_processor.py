@@ -20,8 +20,14 @@ ATTENTION_TYPE_TO_MODULE = {
 }
 
 
-def prepare_args(config: EfficientAttnConfig):
-     match config.efficient_attention_type:
+def prepare_args(config: EfficientAttnConfig, layer_num: Optional[int] = None):
+    if isinstance(config.efficient_attention_type, Dict):
+        assert layer_num is not None
+        attn_type = config.efficient_attention_type[layer_num]
+    else:
+        attn_type = config.efficient_attention_type
+
+    match attn_type:
         case AttentionType.soba_monarch:
             return (
                 config.block_size,
@@ -50,7 +56,7 @@ def prepare_args(config: EfficientAttnConfig):
 
 
 class EfficientAttnProcessor(AttnProcessor2_0):
-    def __init__(self, config: EfficientAttnConfig, layer_num: int):
+    def __init__(self, config: EfficientAttnConfig, layer_num: Optional[int] = None):
         super().__init__()
         if isinstance(config.efficient_attention_type, Dict):
             attention_type = config.efficient_attention_type[layer_num]
@@ -58,7 +64,7 @@ class EfficientAttnProcessor(AttnProcessor2_0):
         else:
             module = ATTENTION_TYPE_TO_MODULE[config.efficient_attention_type]
 
-        self.attn_module = module(*prepare_args(config))
+        self.attn_module = module(*prepare_args(config, layer_num))
         maybe_compile(self.attn_module)
 
     def __call__(
