@@ -4,12 +4,17 @@ import os
 
 from dit.config import AttentionType
 from dit.pipeline import get_pipeline
+from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
+
+from torchvision.utils import save_image
 
 from PIL import Image
 import time
 
-def save_image(image: Image, save_path: str):
-    image.save(save_path)
+def save_output_images(output: ImagePipelineOutput, save_path: str):
+    images = torch.Tensor(output.images)
+    images_reshaped = images.permute(0, 3, 1, 2)
+    save_image(images_reshaped, save_path)
 
 def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:
     assert max(layers_to_replace) <= num_layers
@@ -20,10 +25,12 @@ def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_la
 
     return attn_dict
 
+# Performer model is only generating all black images
+# so I have it commented out for now
 @torch.no_grad()
 def main():
     # Classes to generate
-    classes = ["German shepherd"]
+    classes = ["triceratops"]
 
     # Make pipelines
     sm_pipe = get_pipeline(attn_type=AttentionType.softmax)
@@ -44,37 +51,37 @@ def main():
     # Generate images
     class_ids = sm_pipe.get_label_ids(classes)
 
-    sm_output = sm_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
-    soba_output = soba_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
-    lin_output = lin_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
-    #perf_output = perf_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
-    nys_output = nys_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
-    cos_output = cos_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps)
+    output_type = "numpy"
+
+    sm_output = sm_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    soba_output = soba_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    lin_output = lin_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    #perf_output = perf_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    nys_output = nys_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    cos_output = cos_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
 
     # Save images
-    parent_dir = "./dit/generations"
-    for (i, class_) in enumerate(classes):
-        save_path = os.path.join(parent_dir, class_)
-        if not os.path.exists(save_path):
-            os.makedirs(save_path)
+    save_path = "./dit/generations"
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
 
-        save_path_sm = os.path.join(save_path, "softmax.png")
-        save_image(sm_output.images[i], save_path_sm)
+    sm_save_path = os.path.join(save_path, "softmax.png")
+    save_output_images(sm_output, sm_save_path)
 
-        save_path_soba = os.path.join(save_path, "soba.png")
-        save_image(soba_output.images[i], save_path_soba)
+    soba_save_path = os.path.join(save_path, "soba.png")
+    save_output_images(soba_output, soba_save_path)
 
-        save_path_lin = os.path.join(save_path, "linformer.png")
-        save_image(lin_output.images[i], save_path_lin)
+    lin_save_path = os.path.join(save_path, "linformer.png")
+    save_output_images(lin_output, lin_save_path)
 
-        # save_path_perf = os.path.join(save_path, "performer.png")
-        # save_image(perf_output.images[i], save_path_perf)
+    # save_path_perf = os.path.join(save_path, "performer.png")
+    # save_output_images(perf_output, save_path_perf)
 
-        save_path_nys = os.path.join(save_path, "nystromformer.png")
-        save_image(nys_output.images[i], save_path_nys)
+    nys_save_path = os.path.join(save_path, "nystromformer.png")
+    save_output_images(nys_output, nys_save_path)
 
-        save_path_cos = os.path.join(save_path, "cosformer.png")
-        save_image(cos_output.images[i], save_path_cos)
+    cos_save_path = os.path.join(save_path, "cosformer.png")
+    save_output_images(cos_output, cos_save_path)
 
 
 
