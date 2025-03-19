@@ -65,7 +65,7 @@ class EfficientAttnProcessor(AttnProcessor2_0):
             module = ATTENTION_TYPE_TO_MODULE[config.efficient_attention_type]
 
         self.attn_module = module(*prepare_args(config, layer_num))
-        maybe_compile(self.attn_module)
+        #maybe_compile(self.attn_module)
 
     def __call__(
         self,
