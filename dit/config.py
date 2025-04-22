@@ -26,10 +26,12 @@ class EfficientAttnConfig:
         estimator_type: str = "pos",
         ortho_features: bool = True,
         num_attention_heads: int = 16,
-        conv_kernel_size: Optional[int] = None
+        conv_kernel_size: Optional[int] = None,
+        module_device = None
     ):
         
         self.efficient_attention_type = efficient_attention_type
+        self.module_device = module_device
 
         # Softmax
         self.enable_flash_attention = enable_flash_attention

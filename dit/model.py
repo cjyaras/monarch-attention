@@ -81,3 +81,15 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
                 for layer_idx in range(self.config.num_layers)
             ]
         )
+
+
+def get_model(config: EfficientAttnConfig,
+              model_path: str = "facebook/DiT-XL-2-256",
+              model_subfolder: str = "transformer",
+              device = 'cpu'):
+    
+    model = CustomDiTTransformer2DModel.from_pretrained(model_path, subfolder=model_subfolder, efficient_attention_config=config)
+    model = model.to(device)  # type: ignore
+    model.eval()
+
+    return model

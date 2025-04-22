@@ -3,7 +3,7 @@ from typing import Optional, Dict, List, Union
 import torch
 
 from dit.config import AttentionType, get_config
-from dit.model import CustomDiTTransformer2DModel
+from dit.model import CustomDiTTransformer2DModel, get_model
 from diffusers import DiTPipeline
 from diffusers.models import DiTTransformer2DModel
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
@@ -38,7 +38,7 @@ class CustomDiTPipeline(DiTPipeline):
         self,
         class_labels: List[int],
         latents: Optional[torch.Tensor] = None, # Optional random sample input
-        guidance_scale: float = 4.0,
+        guidance_scale: float = 0.0,
         generator: Optional[Union[torch.Generator, List[torch.Generator]]] = None,
         num_inference_steps: int = 50,
         output_type: Optional[str] = "pil",
@@ -145,11 +145,13 @@ class CustomDiTPipeline(DiTPipeline):
 def get_pipeline(attn_type: AttentionType,
                  model_path: str = "facebook/DiT-XL-2-256",
                  model_subfolder: str = "transformer", 
+                 device = 'cpu',
                  **kwargs):
 
     config = get_config(efficient_attention_type=attn_type, **kwargs)
-    model = CustomDiTTransformer2DModel.from_pretrained(model_path, subfolder=model_subfolder, efficient_attention_config=config)
+    model = get_model(config, model_path, model_subfolder, device)
+
     pipe = CustomDiTPipeline.from_pretrained(model_path)
     pipe.transformer = model
 
-    return pipe
+    return pipe.to(device)

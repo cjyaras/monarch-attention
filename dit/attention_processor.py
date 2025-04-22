@@ -39,10 +39,10 @@ def prepare_args(config: EfficientAttnConfig, layer_num: Optional[int] = None):
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
         case AttentionType.linformer:
-            return (config.rank, config.seq_len, config.share_kv)
+            return (config.rank, config.seq_len, config.share_kv, config.module_device)
 
         case AttentionType.performer:
-            return (config.rank, config.estimator_type, config.ortho_features)
+            return (config.rank, config.estimator_type, config.ortho_features, config.module_device)
 
         case AttentionType.nystromformer:
             return (config.rank, config.num_attention_heads, config.conv_kernel_size)
@@ -65,7 +65,7 @@ class EfficientAttnProcessor(AttnProcessor2_0):
             module = ATTENTION_TYPE_TO_MODULE[config.efficient_attention_type]
 
         self.attn_module = module(*prepare_args(config, layer_num))
-        #maybe_compile(self.attn_module)
+        maybe_compile(self.attn_module)
 
     def __call__(
         self,
