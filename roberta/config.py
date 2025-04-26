@@ -3,7 +3,7 @@ from typing import Dict, List, Optional, Union
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
-from common.soba import InitType, PadType
+from common.soba import PadType
 from roberta.data import MAX_LENGTH
 
 
@@ -28,7 +28,6 @@ class CustomRobertaConfig(RobertaConfig):
         rank: Optional[int] = None,
         block_size: Optional[int] = None,
         pad_type: PadType = PadType.pre,
-        init_type: InitType = InitType.eye,
         share_kv: bool = False,
         estimator_type: str = "pos",
         ortho_features: bool = True,
@@ -45,7 +44,6 @@ class CustomRobertaConfig(RobertaConfig):
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type
-        self.init_type = init_type
 
         # Linformer
         # self.rank used as projection dim

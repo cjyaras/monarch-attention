@@ -37,7 +37,6 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
                 config.block_size,
                 config.num_steps,
                 config.pad_type,
-                config.init_type,
             )
 
         case AttentionType.linformer:

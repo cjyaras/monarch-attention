@@ -1,15 +1,16 @@
 from typing import Optional, Union
 
-from common.utils import get_device
-from roberta.config import CustomRobertaConfig
-from roberta.model import CustomRobertaForQuestionAnswering, get_model
-from roberta.processor import get_processor
 from transformers import ModelCard, PreTrainedTokenizer, pipeline
 from transformers.pipelines import PIPELINE_REGISTRY
 from transformers.pipelines.question_answering import (
     QuestionAnsweringArgumentHandler,
     QuestionAnsweringPipeline,
 )
+
+from common.utils import get_device
+from roberta.config import CustomRobertaConfig
+from roberta.model import CustomRobertaForQuestionAnswering, get_model
+from roberta.processor import get_processor
 
 
 class CustomQuestionAnsweringPipeline(QuestionAnsweringPipeline):
@@ -51,6 +52,7 @@ def get_pipeline(
         device=get_device(),
         tokenizer=get_processor(),
         batch_size=batch_size,
+        torch_dtype="float16",
     )
     assert isinstance(pipe, CustomQuestionAnsweringPipeline)
     return pipe

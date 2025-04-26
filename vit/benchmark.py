@@ -1,9 +1,9 @@
 import torch
 
-from vit.config import AttentionType, get_config
+from vit.config import AttentionType, PadType, get_config
 from vit.evaluation import Evaluator
 
-NUM_SAMPLES = 16
+NUM_SAMPLES = 128
 TOP_K = 5
 BATCH_SIZE = 4
 SAVE_DIR = "vit/results"
@@ -29,7 +29,8 @@ def main():
     # Monarch
     config = get_config()
     config.attention_type = AttentionType.soba_monarch
-    config.num_steps = 4
+    config.pad_type = PadType.pre
+    config.num_steps = 2
     config.block_size = 14
     print(config.attention_type)
     print(print(evaluator.evaluate(config)))

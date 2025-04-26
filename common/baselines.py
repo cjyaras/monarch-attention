@@ -26,10 +26,7 @@ class Softmax(nn.Module):
 
         assert not self.use_flash_attention
 
-        assert query.shape == key.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape
-        if attention_mask is not None:
-            assert attention_mask.shape == (batch_size, seq_len)
+        seq_len, head_dim = query.shape[-2:]
 
         attention_mask = (
             ((1.0 - attention_mask[:, None, None, :]) * torch.finfo(query.dtype).min)
@@ -53,10 +50,7 @@ class Softmax(nn.Module):
         attention_mask: Optional[Tensor] = None,
     ) -> Tensor:
 
-        assert query.shape == key.shape and key.shape == value.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape
-        if attention_mask is not None:
-            assert attention_mask.shape == (batch_size, seq_len)
+        head_dim = query.shape[-1]
 
         if self.use_flash_attention:
             attention_mask = (

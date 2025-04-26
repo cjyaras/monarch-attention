@@ -33,6 +33,7 @@ def get_pipeline(
         device=get_device(),
         image_processor=get_processor(),
         batch_size=batch_size,
+        torch_dtype="float16",
     )
     assert isinstance(pipe, CustomImageClassificationPipeline)
     return pipe

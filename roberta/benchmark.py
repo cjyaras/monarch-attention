@@ -1,9 +1,9 @@
 import torch
 
-from roberta.config import AttentionType, InitType, get_config
+from roberta.config import AttentionType, get_config
 from roberta.evaluation import Evaluator
 
-NUM_SAMPLES = 16
+NUM_SAMPLES = 256
 BATCH_SIZE = 4
 SAVE_DIR = "roberta/results"
 
@@ -17,7 +17,10 @@ def main():
     )
 
     efficient_attn_layers = [0, 1, 2, 3, 8, 9, 10, 11]
-    # efficient_attn_layers = [5]
+    # efficient_attn_layers = [1, 3, 5, 7, 9, 11]
+    # efficient_attn_layers = [8, 9, 10, 11]
+    # efficient_attn_layers = [6, 7, 8, 9, 10, 11]
+    # efficient_attn_layers = range(12)
 
     def get_mixed_type(efficient_type, default_type):
         return {
@@ -40,9 +43,8 @@ def main():
     config.attention_type = get_mixed_type(
         AttentionType.soba_monarch, AttentionType.softmax
     )
-    config.init_type = InitType.eye
-    config.num_steps = 5
-    config.block_size = 24
+    config.num_steps = 2
+    config.block_size = 32
     print(config.attention_type)
     print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
