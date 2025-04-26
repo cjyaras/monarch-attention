@@ -36,16 +36,18 @@ def main():
     key = key[0, layer, head, 1:]
 
     softmax_matrix = Softmax().get_matrix(query, key)
-    monarch_matrix_history = monarch_attention_history(query, key, T=2, B=14)
+    monarch_matrix_history = monarch_attention_history(query, key, T=1, B=14)
 
     fig, ax = plt.subplots(1, len(monarch_matrix_history) + 1)
     for i, m in enumerate(monarch_matrix_history):
         ax[i].imshow(m.cpu().numpy())
         ax[i].set_title(f"Step {i}")
+        ax[i].axis("off")
     ax[-1].imshow(softmax_matrix.cpu().numpy())
     ax[-1].set_title(f"Softmax")
+    ax[-1].axis("off")
     # fig.savefig("monarch_history.pdf", bbox_inches="tight")
-    fig.savefig("monarch_history.png", dpi=300)
+    fig.savefig("monarch_history.pdf", bbox_inches="tight")
 
     plt.imshow(monarch_matrix_history[0].cpu().numpy())
     # monarch_matrix_history = SobaMonarch(14, 2, PadType.pre).get_matrix(
