@@ -85,17 +85,27 @@ class Softmax(nn.Module):
 
 
 class Linformer(nn.Module):
-    def __init__(self, proj_dim: int, seq_len: int, share_kv: bool = False, module_device = None):
+    def __init__(
+        self, proj_dim: int, seq_len: int, share_kv: bool = False, module_device=None
+    ):
         super().__init__()
 
         self.proj_dim = proj_dim
         self.share_kv = share_kv
 
-        self.module_device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if module_device is None else module_device
+        self.module_device = (
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if module_device is None
+            else module_device
+        )
 
-        self.E = nn.Parameter(data=torch.randn(proj_dim, seq_len), requires_grad=False).to(self.module_device)
+        self.E = nn.Parameter(
+            data=torch.randn(proj_dim, seq_len), requires_grad=False
+        ).to(self.module_device)
         if not self.share_kv:
-            self.F = nn.Parameter(data=torch.randn(proj_dim, seq_len), requires_grad=False).to(self.module_device)
+            self.F = nn.Parameter(
+                data=torch.randn(proj_dim, seq_len), requires_grad=False
+            ).to(self.module_device)
 
     def get_matrix(
         self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
@@ -158,7 +168,11 @@ class Linformer(nn.Module):
 
 class Performer(nn.Module):
     def __init__(
-        self, num_samples: int, estimator_type: str = "pos", ortho_features: bool = True, module_device = None
+        self,
+        num_samples: int,
+        estimator_type: str = "pos",
+        ortho_features: bool = True,
+        module_device=None,
     ):
         super().__init__()
 
@@ -170,8 +184,12 @@ class Performer(nn.Module):
         ]  # Type of feature map to use to estimate softmax attn
         self.estimator_type = estimator_type
         self.ortho_features = ortho_features  # Flag to use orthogonal features or not
-       
-        self.module_device = torch.device("cuda" if torch.cuda.is_available() else "cpu") if module_device is None else module_device
+
+        self.module_device = (
+            torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            if module_device is None
+            else module_device
+        )
 
     def get_matrix(
         self, query: Tensor, key: Tensor, attention_mask: Optional[Tensor] = None
@@ -212,7 +230,13 @@ class Performer(nn.Module):
         query_prime, key_prime = self._compute_performer_factors(
             query, key, attention_mask
         )
-        C = torch.cat([value, torch.ones(batch_size, num_heads, seq_len, 1).to(self.module_device)], dim=-1)
+        C = torch.cat(
+            [
+                value,
+                torch.ones(batch_size, num_heads, seq_len, 1).to(self.module_device),
+            ],
+            dim=-1,
+        )
 
         # Intermediate outputs for bidirectional attention
         buf1 = torch.matmul(key_prime.transpose(-2, -1), C)

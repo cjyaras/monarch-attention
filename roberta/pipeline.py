@@ -1,11 +1,12 @@
 from typing import Optional, Union
 
-from transformers import ModelCard, PreTrainedTokenizer, pipeline
-from transformers.pipelines import PIPELINE_REGISTRY
+from transformers.modelcard import ModelCard
+from transformers.pipelines import PIPELINE_REGISTRY, pipeline
 from transformers.pipelines.question_answering import (
     QuestionAnsweringArgumentHandler,
     QuestionAnsweringPipeline,
 )
+from transformers.tokenization_utils import PreTrainedTokenizer
 
 from common.utils import get_device
 from roberta.config import CustomRobertaConfig

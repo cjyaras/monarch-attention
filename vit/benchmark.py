@@ -28,12 +28,12 @@ def main():
 
     # Monarch
     config = get_config()
-    config.attention_type = AttentionType.soba_monarch
+    config.attention_type = AttentionType.monarch
     config.pad_type = PadType.pre
-    config.num_steps = 2
+    config.num_steps = 1
     config.block_size = 14
     print(config.attention_type)
-    print(print(evaluator.evaluate(config)))
+    print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
     return

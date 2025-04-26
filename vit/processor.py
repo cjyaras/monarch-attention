@@ -1,4 +1,4 @@
-from transformers import ViTImageProcessorFast
+from transformers.models.vit import ViTImageProcessorFast
 
 
 def get_processor():

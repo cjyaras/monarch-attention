@@ -1,9 +1,9 @@
 from typing import Optional
 
 from diffusers.models.attention import BasicTransformerBlock
-from dit.attention_processor import EfficientAttnProcessor
-from dit.config import EfficientAttnConfig, AttentionType 
 
+from dit.attention_processor import EfficientAttnProcessor
+from dit.config import AttentionType, EfficientAttnConfig
 
 
 class CustomBasicTransformerBlock(BasicTransformerBlock):
@@ -33,9 +33,9 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
         ada_norm_bias: Optional[int] = None,
         ff_inner_dim: Optional[int] = None,
         ff_bias: bool = True,
-        attention_out_bias: bool = True
+        attention_out_bias: bool = True,
     ):
-        
+
         super().__init__(
             dim,
             num_attention_heads,
@@ -59,7 +59,7 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
             ada_norm_bias,
             ff_inner_dim,
             ff_bias,
-            attention_out_bias
+            attention_out_bias,
         )
 
         # assert efficient_attention_config.efficient_attention_type in [AttentionType.softmax,
@@ -68,7 +68,11 @@ class CustomBasicTransformerBlock(BasicTransformerBlock):
         #                                                                AttentionType.performer,
         #                                                                AttentionType.nystromformer,
         #                                                                AttentionType.cosformer]
-        
-        self.attn1.set_processor(EfficientAttnProcessor(efficient_attention_config, layer_num)) 
+
+        self.attn1.set_processor(
+            EfficientAttnProcessor(efficient_attention_config, layer_num)
+        )
         if cross_attention_dim is not None or double_self_attention:
-            self.attn2.set_processor(EfficientAttnProcessor(efficient_attention_config, layer_num))
+            self.attn2.set_processor(
+                EfficientAttnProcessor(efficient_attention_config, layer_num)
+            )

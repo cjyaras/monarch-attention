@@ -3,12 +3,12 @@ from typing import Dict, Optional, Union
 
 from transformers.models.vit.configuration_vit import ViTConfig
 
-from common.soba import PadType
+from ma.monarch_attention import PadType
 
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    soba_monarch = "soba-monarch"
+    monarch = "monarch"
     linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
@@ -38,7 +38,7 @@ class CustomViTConfig(ViTConfig):
         # Softmax
         self.enable_flash_attention = enable_flash_attention
 
-        # SobaMonarch
+        # Monarch
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type

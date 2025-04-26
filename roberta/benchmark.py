@@ -40,9 +40,7 @@ def main():
 
     # Monarch
     config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.soba_monarch, AttentionType.softmax
-    )
+    config.attention_type = get_mixed_type(AttentionType.monarch, AttentionType.softmax)
     config.num_steps = 2
     config.block_size = 32
     print(config.attention_type)

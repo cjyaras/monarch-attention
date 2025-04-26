@@ -1,5 +1,4 @@
-from transformers import pipeline
-from transformers.pipelines import PIPELINE_REGISTRY
+from transformers.pipelines import PIPELINE_REGISTRY, pipeline
 from transformers.pipelines.image_classification import ImageClassificationPipeline
 from transformers.utils.import_utils import requires_backends
 

@@ -29,5 +29,6 @@ def get_device() -> DeviceLikeType:
 
 
 def maybe_compile(module: nn.Module, mode: str = "reduce-overhead"):
-    if torch.cuda.is_available() and not isinstance(module, Softmax):
-        module.compile(mode=mode)
+    pass
+    # if torch.cuda.is_available() and not isinstance(module, Softmax):
+    #     module.compile(mode=mode)

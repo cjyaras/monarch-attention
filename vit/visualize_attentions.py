@@ -1,20 +1,15 @@
 import os
-from math import sqrt
 
 import matplotlib.pyplot as plt
 import torch
 
 from common.baselines import Softmax
-from common.soba import PadType, SobaMonarch
+from ma.ma_history import monarch_attention_history, monarch_matrix
 from vit.config import get_config
 from vit.extract import extract_query_key
 from vit.model import AttentionType
 
 Tensor = torch.Tensor
-
-
-def softmax_varational_objective(P: Tensor, Z: Tensor) -> Tensor:
-    return torch.sum(torch.special.xlogy(P, P)) - torch.sum(P * Z)
 
 
 @torch.no_grad()
@@ -34,23 +29,33 @@ def main():
     query = torch.load("vit/query.pt")
     key = torch.load("vit/key.pt")
 
-    layer = 5
-    head = 0
+    layer = 8
+    head = 5
 
-    query = query[0:1, layer, head : head + 1, 1:]
-    key = key[0:1, layer, head : head + 1, 1:]
+    query = query[0, layer, head, 1:]
+    key = key[0, layer, head, 1:]
 
-    # attention_mask = torch.tensor([[1] * (14 * 7) + [0] * (14 * 7)])
-    attention_mask = None
-    softmax_matrix = Softmax().get_matrix(query, key, attention_mask=attention_mask)
-    soba_monarch_matrix = SobaMonarch(14, 2, PadType.pre).get_matrix(
-        query, key, attention_mask=attention_mask
-    )
+    softmax_matrix = Softmax().get_matrix(query, key)
+    monarch_matrix_history = monarch_attention_history(query, key, T=2, B=14)
 
-    fig, ax = plt.subplots(1, 2)
-    ax[0].imshow(softmax_matrix[0, 0])
-    ax[1].imshow(soba_monarch_matrix[0, 0])
-    plt.show()
+    fig, ax = plt.subplots(1, len(monarch_matrix_history) + 1)
+    for i, m in enumerate(monarch_matrix_history):
+        ax[i].imshow(m.cpu().numpy())
+        ax[i].set_title(f"Step {i}")
+    ax[-1].imshow(softmax_matrix.cpu().numpy())
+    ax[-1].set_title(f"Softmax")
+    # fig.savefig("monarch_history.pdf", bbox_inches="tight")
+    fig.savefig("monarch_history.png", dpi=300)
+
+    plt.imshow(monarch_matrix_history[0].cpu().numpy())
+    # monarch_matrix_history = SobaMonarch(14, 2, PadType.pre).get_matrix(
+    #     query, key, attention_mask=attention_mask
+    # )
+
+    # fig, ax = plt.subplots(1, 2)
+    # ax[0].imshow(softmax_matrix[0, 0])
+    # ax[1].imshow(soba_monarch_matrix[0, 0])
+    # plt.show()
 
     # softmax_matrix = Softmax().get_matrix(query, key)
     # soba_monarch_matrix = SobaMonarch(14, 4, PadType.pre).get_matrix(

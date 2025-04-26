@@ -1,7 +1,7 @@
-from typing import Optional, Union, Dict
 from enum import StrEnum
+from typing import Dict, Optional, Union
 
-from common.soba import PadType, InitType
+from common.soba import PadType
 
 
 class AttentionType(StrEnum):
@@ -12,24 +12,25 @@ class AttentionType(StrEnum):
     nystromformer = "nystromformer"
     cosformer = "cosformer"
 
+
 class EfficientAttnConfig:
-    def __init__(self, 
+    def __init__(
+        self,
         efficient_attention_type: Union[AttentionType, Dict[int, AttentionType]],
         enable_flash_attention: bool = False,
         rank: int = 8,
-        block_size: Optional[int] = 16, 
+        block_size: Optional[int] = 16,
         num_steps: Optional[int] = 3,
         pad_type: PadType = PadType.pre,
-        init_type: InitType = InitType.eye,
         share_kv: bool = False,
         seq_len: int = 16**2,
         estimator_type: str = "pos",
         ortho_features: bool = True,
         num_attention_heads: int = 16,
         conv_kernel_size: Optional[int] = None,
-        module_device = None
+        module_device=None,
     ):
-        
+
         self.efficient_attention_type = efficient_attention_type
         self.module_device = module_device
 
@@ -40,7 +41,6 @@ class EfficientAttnConfig:
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type
-        self.init_type = init_type
 
         # Linformer
         # self.rank used as projection dim

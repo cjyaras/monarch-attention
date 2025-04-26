@@ -3,13 +3,13 @@ from typing import Dict, List, Optional, Union
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
-from common.soba import PadType
+from ma.monarch_attention import PadType
 from roberta.data import MAX_LENGTH
 
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    soba_monarch = "soba-monarch"
+    monarch = "monarch"
     hybrid = "hybrid"
     linformer = "linformer"
     performer = "performer"
@@ -40,7 +40,7 @@ class CustomRobertaConfig(RobertaConfig):
         # Softmax
         self.enable_flash_attention = enable_flash_attention
 
-        # SobaMonarch
+        # Monarch
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type

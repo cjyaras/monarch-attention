@@ -1,4 +1,4 @@
-from transformers import RobertaTokenizerFast
+from transformers.models.roberta import RobertaTokenizerFast
 
 
 def get_processor():

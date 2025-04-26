@@ -6,18 +6,18 @@ from transformers.models.vit.modeling_vit import (
     ViTModel,
     ViTSelfAttention,
 )
-from transformers.utils.logging import ERROR, set_verbosity
+from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
 from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax
-from common.soba import SobaMonarch
 from common.utils import get_device, maybe_compile
+from ma.monarch_attention import MonarchAttention
 from vit.config import AttentionType, CustomViTConfig
 
 set_verbosity(ERROR)
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
-    AttentionType.soba_monarch: SobaMonarch,
+    AttentionType.monarch: MonarchAttention,
     AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
@@ -32,7 +32,7 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
 
-        case AttentionType.soba_monarch:
+        case AttentionType.monarch:
             return (
                 config.block_size,
                 config.num_steps,
