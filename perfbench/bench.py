@@ -1,0 +1,261 @@
+from flash_monarch_attention import flash_monarch_attention
+from fused_flash_monarch_attention import fused_flash_monarch_attention
+from flash_monarch_attention import flash_monarch_attention_reference
+from flash_attention import flash_attention
+from enum import Enum
+
+import torch
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
+from triton.testing import do_bench
+import logging
+import argparse
+from math import sqrt
+import numpy as np
+
+class RunMode(Enum):
+    NSYS = 0
+    NCU = 1
+    NORMAL = 2
+
+def benchmark(run_mode, func, *args):
+
+    if run_mode == RunMode.NORMAL:
+        time = do_bench(lambda: func(*args))
+        print(f"{func.__name__} time: {time}")
+        return time
+    elif run_mode == RunMode.NCU:
+        o = func(*args)
+    elif run_mode == RunMode.NSYS:    
+        num_iters = 20
+        num_warmup_iters = 10
+        for i in range(num_iters):
+            if i == num_warmup_iters: torch.cuda.cudart().cudaProfilerStart()
+            if i >= num_warmup_iters: torch.cuda.nvtx.range_push(f"{func.__name__} Iteration {i}")
+            func(*args)
+            if i >= num_warmup_iters: torch.cuda.nvtx.range_pop()
+        torch.cuda.cudart().cudaProfilerStop()
+
+def sweep_batch(num_heads, seq_len, d):
+
+    run_mode = RunMode.NORMAL
+
+    batch_sizes = [2 ** i for i in range(3, 14)] 
+
+    flash_monarch_times = []
+    flash_attn_times = []
+    sdp_times = []
+
+    for batch in batch_sizes:
+        print(f"\nBatch size: {batch}")
+
+        q = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        k = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        v = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        attn_mask = None
+        b = int(sqrt(seq_len))
+
+        try:
+            t1 = benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b)
+        except Exception as e:
+            print(f"flash_monarch_attention failed: {e}")
+            t1 = float("nan")
+
+        try:
+            t2 = benchmark(run_mode, flash_attention, q, k, v, attn_mask)
+        except Exception as e:
+            print(f"flash_attention failed: {e}")
+            t2 = float("nan")
+
+        try:
+            t3 = benchmark(run_mode, F.scaled_dot_product_attention, q, k, v)
+        except Exception as e:
+            print(f"scaled_dot_product_attention failed: {e}")
+            t3 = float("nan")
+
+        flash_monarch_times.append(t1)
+        flash_attn_times.append(t2)
+        sdp_times.append(t3)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(batch_sizes, flash_monarch_times, label="flash_monarch_attention", marker="o")
+    plt.plot(batch_sizes, flash_attn_times, label="flash_attention", marker="s")
+    plt.plot(batch_sizes, sdp_times, label="scaled_dot_product_attention", marker="^")
+    plt.xscale("log", base=2)
+    plt.xlabel("Batch Size (log scale)")
+    plt.ylabel("Runtime (ms)")
+    plt.title("Attention Runtime vs. Batch Size")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"attention_runtime_vs_batchsize_seq_{seq_len}.pdf")
+
+    normalized_monarch = []
+    normalized_flash = []
+    normalized_sdp = []
+
+    for t1, t2, t3 in zip(flash_monarch_times, flash_attn_times, sdp_times):
+        values = [t1, t2, t3]
+        if any(np.isnan(values)):
+            normalized_monarch.append(np.nan)
+            normalized_flash.append(np.nan)
+            normalized_sdp.append(np.nan)
+        else:
+            max_val = max(values)
+            normalized_monarch.append(t1 / max_val)
+            normalized_flash.append(t2 / max_val)
+            normalized_sdp.append(t3 / max_val)
+
+    x = np.arange(len(batch_sizes))
+    width = 0.25
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(x - width, normalized_monarch, width, label="flash_monarch_attention")
+    plt.bar(x, normalized_flash, width, label="flash_attention")
+    plt.bar(x + width, normalized_sdp, width, label="scaled_dot_product_attention")
+
+    plt.xlabel("Batch Size")
+    plt.ylabel("Normalized Runtime (0 = fastest, 1 = slowest)")
+    plt.title("Normalized Attention Runtime by Batch Size")
+    plt.xticks(ticks=x, labels=batch_sizes, rotation=45)
+    plt.legend()
+    plt.grid(True, axis='y')
+    plt.tight_layout()
+    plt.savefig(f"normalized_attention_runtime_vs_batchsize_seq_{seq_len}.pdf")
+
+def sweep_seq_len(batch, num_heads, d, T):
+    run_mode = RunMode.NORMAL
+
+    seq_lens = [4 ** i for i in range(4, 8)] 
+
+    flash_monarch_times = []
+    flash_attn_times = []
+    sdp_times = []
+
+    for seq_len in seq_lens:
+        print(f"\nSequence length: {seq_len}")
+
+        q = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        k = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        v = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16, device="cuda")
+        attn_mask = None
+        pre_pad = False
+        b = int(sqrt(seq_len))
+
+        try:
+            t1 = benchmark(run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad)
+        except Exception as e:
+            print(f"flash_monarch_attention failed: {e}")
+            t1 = float("nan")
+
+        try:
+            t2 = benchmark(run_mode, F.scaled_dot_product_attention, q, k, v)
+        except Exception as e:
+            print(f"scaled_dot_product_attention failed: {e}")
+            t2 = float("nan")
+
+        flash_monarch_times.append(t1)
+        sdp_times.append(t2)
+
+    plt.figure(figsize=(10, 6))
+    plt.plot(seq_lens, flash_monarch_times, label="flash_monarch_attention", marker="o")
+    plt.plot(seq_lens, sdp_times, label="scaled_dot_product_attention", marker="^")
+    plt.xscale("log", base=2)
+    plt.xlabel("Sequence Length (log scale)")
+    plt.ylabel("Runtime (ms)")
+    plt.title("Attention Runtime vs. Sequence Length")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(f"attention_runtime_vs_sequence_length_batch_{batch}.pdf")
+
+    normalized_monarch = []
+    normalized_sdp = []
+
+    for t1, t2 in zip(flash_monarch_times, sdp_times):
+        values = [t1, t2]
+        if any(np.isnan(values)):
+            normalized_monarch.append(np.nan)
+            normalized_sdp.append(np.nan)
+        else:
+            max_val = max(values)
+            normalized_monarch.append(t1 / max_val)
+            normalized_sdp.append(t2 / max_val)
+
+    x = np.arange(len(seq_lens))
+    width = 0.25
+
+    plt.figure(figsize=(12, 6))
+    plt.bar(x - width / 2, normalized_monarch, width, label="flash_monarch_attention")
+    plt.bar(x + width / 2, normalized_sdp, width, label="scaled_dot_product_attention")
+
+    plt.xlabel("Sequence Length")
+    plt.ylabel("Normalized Runtime (0 = fastest, 1 = slowest)")
+    plt.title("Normalized Attention Runtime by Sequence Length")
+    plt.xticks(ticks=x, labels=seq_lens, rotation=45)
+    plt.legend()
+    plt.grid(True, axis='y')
+    plt.tight_layout()
+    plt.savefig(f"normalized_attention_runtime_vs_sequence_length_batch_{batch}.pdf")
+
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--run_mode",
+        type=lambda mode: RunMode[mode.upper()],
+        choices=list(RunMode),
+        default=RunMode.NORMAL,
+        help="Choose the run mode: NSYS, NCU, or NORMAL"
+    )
+    parser.add_argument(
+        "--sweep_batch",
+        action='store_true',
+        help="Run the script to sweep batch size"
+    )
+    parser.add_argument(
+        "--sweep_seq_len",
+        action='store_true',
+        help="Run the script to sweep sequence length"
+    )
+
+    args = parser.parse_args()
+    run_mode = args.run_mode
+
+    batch = 1
+    seq_len = 256
+    num_heads = 12
+    d = 64
+    T = 2
+
+    if args.sweep_batch:
+        sweep_batch(num_heads, seq_len, d)
+    elif args.sweep_seq_len:
+        sweep_seq_len(batch, num_heads, d, T)
+    else:
+        q = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16).cuda()
+        k = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16).cuda()
+        v = torch.randn(batch, num_heads, seq_len, d, dtype=torch.float16).cuda()
+        attn_mask = None
+        pre_pad = False
+        b = int(sqrt(seq_len))
+        
+        try:
+            benchmark(run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad)
+        except Exception as e:
+            print(f"flash_monarch_attention failed: {e}")
+
+        # try:
+        #     benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b)
+        # except Exception as e:
+        #     print(f"fused_flash_monarch_attention failed: {e}")
+
+        # try:
+        #     benchmark(run_mode, flash_attention, q, k, v, attn_mask)
+        # except Exception as e:
+        #     print(f"flash_attention failed: {e}")
+
+        try:
+            benchmark(run_mode, F.scaled_dot_product_attention, q, k, v)
+        except Exception as e:
+            print(f"scaled_dot_product_attention failed: {e}")

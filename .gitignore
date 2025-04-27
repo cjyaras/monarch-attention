@@ -136,6 +136,8 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.flash-monarch-attention-venv/
+gl_source
 
 # Spyder project settings
 .spyderproject
