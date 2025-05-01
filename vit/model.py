@@ -8,8 +8,15 @@ from transformers.models.vit.modeling_vit import (
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax
-from common.utils import get_device, maybe_compile
+from common.baselines import (
+    Cosformer,
+    LinearAttention,
+    Linformer,
+    Nystromformer,
+    Performer,
+    Softmax,
+)
+from common.utils import get_device
 from ma.monarch_attention import MonarchAttention
 from vit.config import AttentionType, CustomViTConfig
 
@@ -22,6 +29,7 @@ ATTENTION_TYPE_TO_MODULE = {
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
     AttentionType.cosformer: Cosformer,
+    AttentionType.linear: LinearAttention,
 }
 
 
@@ -51,6 +59,11 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
         case AttentionType.cosformer:
             return ()
 
+        case AttentionType.linear:
+            # head_dim = config.hidden_size // config.num_attention_heads
+            # return (config.rank, head_dim)  # proj_dim, head_dim
+            return ()
+
         case _:
             raise ValueError(f"Invalid attention type: {attention_type}")
 
@@ -67,8 +80,6 @@ class CustomViTSelfAttention(ViTSelfAttention):
         else:
             module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
             self.attn_module = module(*prepare_args(config.attention_type, config))
-
-        maybe_compile(self.attn_module)
 
     def forward(
         self,

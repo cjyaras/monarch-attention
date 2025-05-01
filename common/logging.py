@@ -3,7 +3,7 @@ import os
 import uuid
 from typing import Dict
 
-from transformers import PretrainedConfig
+from transformers.configuration_utils import PretrainedConfig
 
 
 def generate_random_file_name(extension="json"):

@@ -1,4 +1,4 @@
-from math import sqrt
+import math
 from typing import Optional, Tuple
 
 import numpy as np
@@ -34,7 +34,7 @@ class Softmax(nn.Module):
             else None
         )
         attention_scores = torch.matmul(query, key.transpose(-1, -2))
-        attention_scores = attention_scores / sqrt(head_dim)
+        attention_scores = attention_scores / math.sqrt(head_dim)
 
         if attention_mask is not None:
             attention_scores = attention_scores + attention_mask
@@ -75,7 +75,7 @@ class Softmax(nn.Module):
                 else None
             )
             attention_scores = torch.matmul(query, key.transpose(-1, -2))
-            attention_scores = attention_scores / sqrt(head_dim)
+            attention_scores = attention_scores / math.sqrt(head_dim)
 
             if attention_mask is not None:
                 attention_scores = attention_scores + attention_mask
@@ -142,7 +142,7 @@ class Linformer(nn.Module):
         key_proj = torch.matmul(self.E, key)
 
         # Compute (possibly masked) attention
-        attention_scores = torch.matmul(query, key_proj.transpose(-2, -1)) / sqrt(
+        attention_scores = torch.matmul(query, key_proj.transpose(-2, -1)) / math.sqrt(
             head_dim
         )
         out = F.softmax(attention_scores, dim=-1)
@@ -198,7 +198,7 @@ class Performer(nn.Module):
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute Q', K' from paper
-        query = query / sqrt(head_dim)
+        query = query / math.sqrt(head_dim)
         query_prime, key_prime = self._compute_performer_factors(
             query, key, attention_mask
         )
@@ -279,7 +279,7 @@ class Performer(nn.Module):
         elif self.estimator_type == "hyp-pos":
             h_out, f_out = self._hyp_pos_softmax_kernel_features(mat)
 
-        return (1.0 / sqrt(self.num_samples)) * h_out.unsqueeze(-1) * f_out
+        return (1.0 / math.sqrt(self.num_samples)) * h_out.unsqueeze(-1) * f_out
 
     # cos/sin features
     def _trig_softmax_kernel_features(self, mat: Tensor) -> Tuple[Tensor, Tensor]:
@@ -308,7 +308,9 @@ class Performer(nn.Module):
     def _hyp_pos_softmax_kernel_features(self, mat: Tensor) -> Tuple[Tensor, Tensor]:
         dim = mat.shape[-1]
 
-        h_out = (1.0 / sqrt(2)) * torch.exp(-(torch.linalg.norm(mat, dim=-1) ** 2) / 2)
+        h_out = (1.0 / math.sqrt(2)) * torch.exp(
+            -(torch.linalg.norm(mat, dim=-1) ** 2) / 2
+        )
 
         omega = self._sample_random_vectors(dim).to(mat.device)
         f1_out = torch.exp(torch.matmul(mat, omega))
@@ -428,7 +430,7 @@ class Nystromformer(nn.Module):
     ) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = query.shape
 
-        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / sqrt(
+        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
             head_dim
         )  # Compute attention scores
         out = F.softmax(attention_scores, dim=-1)
@@ -451,16 +453,16 @@ class Nystromformer(nn.Module):
 
         # Compute factors for approx attention
         F_tilde = F.softmax(
-            torch.matmul(query, key_lm.transpose(-2, -1)) / sqrt(head_dim), dim=-1
+            torch.matmul(query, key_lm.transpose(-2, -1)) / math.sqrt(head_dim), dim=-1
         )
         A_tilde = self._iterative_pinv(
             F.softmax(
-                torch.matmul(query_lm, key_lm.transpose(-2, -1)) / sqrt(head_dim),
+                torch.matmul(query_lm, key_lm.transpose(-2, -1)) / math.sqrt(head_dim),
                 dim=-1,
             )
         )
         B_tilde = F.softmax(
-            torch.matmul(query_lm, key.transpose(-2, -1)) / sqrt(head_dim), dim=-1
+            torch.matmul(query_lm, key.transpose(-2, -1)) / math.sqrt(head_dim), dim=-1
         )
 
         # Apply mask if needed
@@ -543,7 +545,7 @@ class Cosformer(nn.Module):
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute feature mapping for Q/K, and normalization factor
-        query = query / sqrt(head_dim)
+        query = query / math.sqrt(head_dim)
         query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(
             query, key, attention_mask
         )
@@ -562,7 +564,7 @@ class Cosformer(nn.Module):
         batch_size, num_heads, seq_len, head_dim = query.shape
 
         # Compute Q, K Cosformer factors
-        query = query / sqrt(head_dim)
+        query = query / math.sqrt(head_dim)
         query_cos_sin, key_cos_sin, norm_ = self._compute_cosformer_factors(
             query, key, attention_mask
         )
@@ -638,3 +640,101 @@ class Cosformer(nn.Module):
             query * valid_attention_mask.transpose(-2, -1),
             key * valid_attention_mask.transpose(-2, -1),
         )
+
+
+class LinearAttention(nn.Module):
+
+    def __init__(self, eps: float = 1e-6):
+        super().__init__()
+        self.eps = eps
+
+    # _init_projections method is removed as initialization happens in __init__
+
+    def _phi(self, x: Tensor) -> Tensor:
+        return 1 + F.elu(x)
+        # B, H, N, D = x.shape
+
+        # # Constant term
+        # ones = torch.ones(B, H, N, 1, device=x.device, dtype=x.dtype)
+        # # Linear term
+        # lin_term = x
+        # # Quadratic term: outer product flattened
+        # # Use einsum for potentially better readability/performance on some backends
+        # outer_prod = torch.einsum("...i,...j->...ij", x, x) / math.sqrt(
+        #     2.0
+        # )  # (B, H, N, d_p, d_p)
+        # quad_term = outer_prod.flatten(start_dim=-2)  # (B, H, N, d_p^2)
+
+        # return torch.cat([ones, lin_term, quad_term], dim=-1)
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        attention_mask: Optional[Tensor] = None,
+    ) -> Tensor:
+        """
+        Computes Taylor Linear Attention.
+
+        Args:
+            query (Tensor): Query tensor (B, H, N, d).
+            key (Tensor): Key tensor (B, H, N, d).
+            value (Tensor): Value tensor (B, H, N, d).
+            attention_mask (Optional[Tensor]): Mask tensor (B, N).
+                                                1 for valid tokens, 0 for padding.
+
+        Returns:
+            Tensor: Output tensor (B, H, N, d).
+        """
+        B, H, N, d_p = query.shape
+        # Apply sqrt(d) scaling before phi
+        scale = d_p**0.25
+        query_scaled = query / scale
+        key_scaled = key / scale
+
+        q_proj = query_scaled
+        k_proj = key_scaled
+        d_phi = 1 + d_p + d_p**2  # d_phi depends on head_dim 'd' directly
+
+        # Apply feature map phi
+        phi_q = self._phi(q_proj)  # (B, H, N, d_phi)
+        phi_k = self._phi(k_proj)  # (B, H, N, d_phi)
+
+        # Prepare mask if provided
+        mask = None
+        if attention_mask is not None:
+            # Input mask shape: (B, N) -> Output mask shape: (B, 1, N, 1)
+            mask = attention_mask.unsqueeze(1).unsqueeze(-1).to(dtype=phi_k.dtype)
+            # Apply mask to phi_k: effectively zeros out contributions from padding tokens
+            phi_k = phi_k * mask
+
+        # --- Linear Attention Computation ---
+        # 1. Compute K'^T @ V term (where K' = phi(K))
+        # Einsum: 'bhnd,bhnv->bhdv' where d=d_phi, v=head_dim
+        kv_term = torch.einsum("bhnd,bhnv->bhdv", phi_k, value)  # (B, H, d_phi, d)
+
+        # 2. Compute Q' @ (K'^T @ V) term (where Q' = phi(Q))
+        # Einsum: 'bhnd,bhdv->bhnv'
+        output = torch.einsum("bhnd,bhdv->bhnv", phi_q, kv_term)  # (B, H, N, d)
+
+        # --- Normalization ---
+        # 1. Compute K'^T @ 1s term
+        ones_val = torch.ones(B, H, N, 1, device=value.device, dtype=value.dtype)
+        if mask is not None:
+            # Apply mask to ones as well, so padding tokens don't contribute to sum
+            ones_val = ones_val * mask
+        # Einsum: 'bhnd,bhnz->bhdz' where z=1
+        k_one_term = torch.einsum(
+            "bhnd,bhnz->bhdz", phi_k, ones_val
+        )  # (B, H, d_phi, 1)
+
+        # 2. Compute Q' @ (K'^T @ 1s) term
+        # Einsum: 'bhnd,bhdz->bhnz'
+        normalizer = torch.einsum("bhnd,bhdz->bhnz", phi_q, k_one_term)  # (B, H, N, 1)
+
+        # 3. Normalize output
+        # Add epsilon to prevent division by zero
+        output = output / (normalizer + self.eps)
+
+        return output

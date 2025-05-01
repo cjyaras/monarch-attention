@@ -13,6 +13,7 @@ class AttentionType(StrEnum):
     performer = "performer"
     nystromformer = "nystromformer"
     cosformer = "cosformer"
+    linear = "linear"
 
 
 class CustomViTConfig(ViTConfig):
@@ -64,6 +65,8 @@ class CustomViTConfig(ViTConfig):
         self.conv_kernel_size = conv_kernel_size
 
         # Cosformer: none
+
+        # Linear Attention
 
 
 def get_config() -> CustomViTConfig:

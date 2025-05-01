@@ -47,11 +47,16 @@ class Evaluator:
                 metric=self.metric,
                 label_mapping=pipe.model.config.label2id,  # type: ignore
             )
-            return sum(
-                [
-                    ftdm.flop_counts[f"vit.encoder.layer.{i}.attention"]["bmm.default"]
-                    for i in range(pipe.model.config.num_hidden_layers)
-                ]
+            return (
+                sum(
+                    [
+                        ftdm.flop_counts[f"vit.encoder.layer.{i}.attention"][
+                            "bmm.default"
+                        ]
+                        for i in range(pipe.model.config.num_hidden_layers)
+                    ]
+                )
+                // self.batch_size
             )
 
     def evaluate(self, config: CustomViTConfig) -> Dict[str, float]:
