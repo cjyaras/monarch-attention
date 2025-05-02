@@ -30,16 +30,25 @@ class Evaluator:
             self.evaluator.compute(
                 model_or_pipeline=pipe,
                 data=self.dataset.take(self.batch_size),
-                metric="squad",  # metric="squad_v2",
-                squad_v2_format=False,  # squad_v2_format=True,
+                metric="squad",
+                squad_v2_format=False,
             )
-            return sum(
-                [
-                    ftdm.flop_counts[f"roberta.encoder.layer.{i}.attention"][
-                        "bmm.default"
+            # self.evaluator.compute(
+            #     model_or_pipeline=pipe,
+            #     data=self.dataset.take(self.batch_size),
+            #     metric="squad_v2",
+            #     squad_v2_format=True,
+            # )
+            return (
+                sum(
+                    [
+                        ftdm.flop_counts[f"roberta.encoder.layer.{i}.attention"][
+                            "bmm.default"
+                        ]
+                        for i in range(pipe.model.config.num_hidden_layers)
                     ]
-                    for i in range(pipe.model.config.num_hidden_layers)
-                ]
+                )
+                // self.batch_size
             )
 
     def evaluate(self, config: CustomRobertaConfig) -> Dict[str, float]:
@@ -50,9 +59,15 @@ class Evaluator:
         result = self.evaluator.compute(
             model_or_pipeline=pipe,
             data=self.dataset,
-            metric="squad",  # metric="squad_v2",
-            squad_v2_format=False,  # squad_v2_format=True,
+            metric="squad",
+            squad_v2_format=False,
         )
+        # result = self.evaluator.compute(
+        #     model_or_pipeline=pipe,
+        #     data=self.dataset,
+        #     metric="squad_v2",
+        #     squad_v2_format=True,
+        # )
         assert isinstance(result, Dict)
         result["total_attention_bmm_flops"] = flop_count
         return result

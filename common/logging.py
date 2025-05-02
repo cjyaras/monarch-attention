@@ -20,8 +20,11 @@ class Logger:
     def save(self, config: PretrainedConfig, result: Dict[str, float]) -> str:
         file_name = generate_random_file_name()
         save_path = os.path.join(self.save_folder, file_name)
+        attention_type = config.attention_type
+        if isinstance(attention_type, dict):
+            attention_type = attention_type[0]
         with open(save_path, "w") as f:
-            json.dump({"attention_type": config.attention_type, "result": result}, f)
+            json.dump({"attention_type": attention_type, "result": result}, f)
 
         return file_name
 

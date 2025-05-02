@@ -26,4 +26,6 @@ class TopKAccuracy(Metric):
         )
 
     def _compute(self, predictions, references):
-        return {"accuracy": float(any_match(predictions, references).mean())}
+        return {
+            "top-5 accuracy (%)": float(100 * any_match(predictions, references).mean())
+        }

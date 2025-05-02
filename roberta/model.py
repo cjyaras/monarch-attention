@@ -9,8 +9,15 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from common.baselines import Softmax
-from common.utils import get_device, maybe_compile
+from common.baselines import (
+    Cosformer,
+    LinearAttention,
+    Linformer,
+    Nystromformer,
+    Performer,
+    Softmax,
+)
+from common.utils import get_device
 from ma.monarch_attention import MonarchAttention
 from roberta.config import AttentionType, CustomRobertaConfig
 
@@ -20,7 +27,12 @@ Tensor = torch.Tensor
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
-    AttentionType.monarch: MonarchAttention,
+    AttentionType.monarch_attention: MonarchAttention,
+    AttentionType.linformer: Linformer,
+    AttentionType.performer: Performer,
+    AttentionType.nystromformer: Nystromformer,
+    AttentionType.cosformer: Cosformer,
+    AttentionType.linear_attention: LinearAttention,
 }
 
 
@@ -31,23 +43,25 @@ def prepare_args(attention_type: AttentionType, config: CustomRobertaConfig) -> 
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
 
-        case AttentionType.monarch:
-            return (
-                config.block_size,
-                config.num_steps,
-                config.pad_type,
-            )
+        case AttentionType.monarch_attention:
+            return (config.block_size, config.num_steps, config.pad_type)
 
         case AttentionType.linformer:
-            return (config.rank, config.seq_len, config.share_kv)
+            return (config.rank,)
 
         case AttentionType.performer:
-            return (config.rank, config.estimator_type, config.ortho_features)
+            return (config.rank,)
 
         case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
+            return (
+                config.rank,
+                config.num_attention_heads,
+            )
 
         case AttentionType.cosformer:
+            return ()
+
+        case AttentionType.linear_attention:
             return ()
 
         case _:
@@ -69,16 +83,6 @@ class CustomRobertaSelfAttention(RobertaSelfAttention):
         else:
             module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
             self.attn_module = module(*prepare_args(config.attention_type, config))
-
-        maybe_compile(self.attn_module)
-
-    # do not try to load sparsity_per_head and n_tokens when loading from a checkpoint
-    def load_state_dict(self, state_dict, **kwargs):
-        if "sparsity_per_head" in state_dict:
-            del state_dict["sparsity_per_head"]
-        if "n_tokens" in state_dict:
-            del state_dict["n_tokens"]
-        super().load_state_dict(state_dict, **kwargs)
 
     def forward(
         self,
@@ -173,9 +177,11 @@ class CustomRobertaForQuestionAnswering(RobertaForQuestionAnswering):
 def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
     device = get_device()
     model = CustomRobertaForQuestionAnswering.from_pretrained(
-        "csarron/roberta-base-squad-v1",
-        config=config,  # deepset/roberta-base-squad2", config=config
+        "csarron/roberta-base-squad-v1", config=config
     )
+    # model = CustomRobertaForQuestionAnswering.from_pretrained(
+    #     "deepset/roberta-base-squad2", config=config
+    # )
     model = model.to(device)  # type: ignore
     model.eval()
     return model

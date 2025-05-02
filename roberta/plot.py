@@ -3,7 +3,7 @@ import os
 
 from common.plotting import plot_results
 
-SAVE_DIR = "vit/results"
+SAVE_DIR = "roberta/results"
 
 
 def main():
@@ -15,12 +15,12 @@ def main():
 
     fig = plot_results(
         results,
-        metric_name="top-5 accuracy (%)",
-        title="ViT ImageNet",
-        y_break_limits=(15, 55),
-        y_break_vspace=0.5,
+        metric_name="f1",
+        title="RoBERTa SQuAD",
+        y_break_limits=(25, 75),  # Break the axis between 0.3 and 0.7
+        y_break_vspace=0.5,  # Set vertical space between subplots
     )
-    fig.savefig("figures/vit_results.pdf", bbox_inches="tight")
+    fig.savefig("figures/roberta_results.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

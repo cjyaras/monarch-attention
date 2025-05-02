@@ -1,10 +1,10 @@
 import torch
 
-from roberta.config import AttentionType, get_config
+from roberta.config import AttentionType, PadType, get_config
 from roberta.evaluation import Evaluator
 
-NUM_SAMPLES = 256
-BATCH_SIZE = 4
+NUM_SAMPLES = 16
+BATCH_SIZE = 8
 SAVE_DIR = "roberta/results"
 
 
@@ -17,10 +17,6 @@ def main():
     )
 
     efficient_attn_layers = [0, 1, 2, 3, 8, 9, 10, 11]
-    # efficient_attn_layers = [1, 3, 5, 7, 9, 11]
-    # efficient_attn_layers = [8, 9, 10, 11]
-    # efficient_attn_layers = [6, 7, 8, 9, 10, 11]
-    # efficient_attn_layers = range(12)
 
     def get_mixed_type(efficient_type, default_type):
         return {
@@ -35,58 +31,66 @@ def main():
     config.attention_type = AttentionType.softmax
     config.enable_flash_attention = False
     print(config.attention_type)
-    print(evaluator.evaluate(config))
     # evaluator.evaluate_and_save(config)
 
     # Monarch
-    config = get_config()
-    config.attention_type = get_mixed_type(AttentionType.monarch, AttentionType.softmax)
-    config.num_steps = 2
-    config.block_size = 32
-    print(config.attention_type)
-    print(evaluator.evaluate(config))
-    # evaluator.evaluate_and_save(config)
-
-    return
+    for num_steps in [1]:
+        for block_size in [24, 48, 64, 128]:
+            config = get_config()
+            config.attention_type = get_mixed_type(
+                AttentionType.monarch_attention, AttentionType.softmax
+            )
+            config.block_size = block_size
+            config.pad_type = PadType.post
+            config.num_steps = num_steps
+            print(config.attention_type[0], num_steps, block_size)
+            # evaluator.evaluate_and_save(config)
 
     # Linformer
-    config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.linformer, AttentionType.softmax
-    )
-    config.rank = 64
-    config.share_kv = False
-    print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    for rank in range(16, 128, 16):
+        config = get_config()
+        config.attention_type = get_mixed_type(
+            AttentionType.linformer, AttentionType.softmax
+        )
+        config.rank = rank
+        print(config.attention_type[0], rank)
+        # evaluator.evaluate_and_save(config)
 
     # Performer
-    config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.performer, AttentionType.softmax
-    )
-    config.rank = 64
-    config.estimator_type = "trig"
-    config.ortho_features = False
-    print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    for rank in range(16, 64, 8):
+        config = get_config()
+        config.attention_type = get_mixed_type(
+            AttentionType.performer, AttentionType.softmax
+        )
+        config.rank = rank
+        print(config.attention_type[0], rank)
+        evaluator.evaluate_and_save(config)
 
     # Nystromformer
-    config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.nystromformer, AttentionType.softmax
-    )
-    config.rank = 64
-    config.conv_kernel_size = None
-    print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    for rank in range(16, 56, 8):
+        config = get_config()
+        config.attention_type = get_mixed_type(
+            AttentionType.nystromformer, AttentionType.softmax
+        )
+        config.rank = rank
+        print(config.attention_type[0], rank)
+        evaluator.evaluate_and_save(config)
 
     # Cosformer
     config = get_config()
     config.attention_type = get_mixed_type(
         AttentionType.cosformer, AttentionType.softmax
     )
-    print(config.attention_type)
-    evaluator.evaluate_and_save(config)
+    print(config.attention_type[0])
+    # evaluator.evaluate_and_save(config)
+
+    # LinearAttention
+    config = get_config()
+    config.attention_type = get_mixed_type(
+        AttentionType.linear_attention, AttentionType.softmax
+    )
+    print(config.attention_type[0])
+    # evaluator.evaluate_and_save(config)
 
 
 if __name__ == "__main__":

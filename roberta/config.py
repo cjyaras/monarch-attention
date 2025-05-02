@@ -1,5 +1,4 @@
 from enum import StrEnum
-from typing import Dict, List, Optional, Union
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
@@ -9,29 +8,26 @@ from roberta.data import MAX_LENGTH
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    monarch = "monarch"
+    monarch_attention = "monarch-attention"
     hybrid = "hybrid"
     linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
     cosformer = "cosformer"
+    linear_attention = "linear-attention"
 
 
 class CustomRobertaConfig(RobertaConfig):
     def __init__(
         self,
-        attention_type: Union[
-            AttentionType, Dict[int, AttentionType]
-        ] = AttentionType.softmax,
+        attention_type: (
+            AttentionType | dict[int, AttentionType]
+        ) = AttentionType.softmax,
         enable_flash_attention: bool = False,
-        num_steps: Optional[int] = None,
-        rank: Optional[int] = None,
-        block_size: Optional[int] = None,
+        num_steps: int | None = None,
+        rank: int | None = None,
+        block_size: int | None = None,
         pad_type: PadType = PadType.pre,
-        share_kv: bool = False,
-        estimator_type: str = "pos",
-        ortho_features: bool = True,
-        conv_kernel_size: Optional[int] = None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -45,28 +41,15 @@ class CustomRobertaConfig(RobertaConfig):
         self.block_size = block_size
         self.pad_type = pad_type
 
-        # Linformer
-        # self.rank used as projection dim
+        # Low-rank attention
         self.rank = rank
-        self.share_kv = share_kv
-
-        # Compute sequence length
-        self.seq_len = MAX_LENGTH
-
-        # Performer
-        # self.rank used as num_samples
-        self.estimator_type = estimator_type
-        self.ortho_features = ortho_features
-
-        # Nystromformer
-        # self.rank used as number of landmarks
-        self.conv_kernel_size = conv_kernel_size
 
         # Set _attn_implementation to eager to override attention_mask logic in RobertaModel
         self._attn_implementation = "eager"
 
 
 def get_config() -> CustomRobertaConfig:
-    config = CustomRobertaConfig.from_pretrained("deepset/roberta-base-squad2")
+    # config = CustomRobertaConfig.from_pretrained("deepset/roberta-base-squad2")
+    config = CustomRobertaConfig.from_pretrained("csarron/roberta-base-squad-v1")
     assert isinstance(config, CustomRobertaConfig)
     return config

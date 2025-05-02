@@ -24,12 +24,12 @@ set_verbosity(ERROR)
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
-    AttentionType.monarch: MonarchAttention,
+    AttentionType.monarch_attention: MonarchAttention,
     AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
     AttentionType.cosformer: Cosformer,
-    AttentionType.linear: LinearAttention,
+    AttentionType.linear_attention: LinearAttention,
 }
 
 
@@ -40,26 +40,22 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
 
-        case AttentionType.monarch:
-            return (
-                config.block_size,
-                config.num_steps,
-                config.pad_type,
-            )
+        case AttentionType.monarch_attention:
+            return (config.block_size, config.num_steps, config.pad_type)
 
         case AttentionType.linformer:
-            return (config.rank, config.seq_len, config.share_kv)
+            return (config.rank,)
 
         case AttentionType.performer:
-            return (config.rank, config.estimator_type, config.ortho_features)
+            return (config.rank,)
 
         case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
+            return (config.rank, config.num_attention_heads)
 
         case AttentionType.cosformer:
             return ()
 
-        case AttentionType.linear:
+        case AttentionType.linear_attention:
             return ()
 
         case _:
