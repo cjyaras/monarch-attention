@@ -60,8 +60,6 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
             return ()
 
         case AttentionType.linear:
-            # head_dim = config.hidden_size // config.num_attention_heads
-            # return (config.rank, head_dim)  # proj_dim, head_dim
             return ()
 
         case _:

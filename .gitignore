@@ -1,6 +1,9 @@
 # Pytorch save files
 *.pt
 
+# json
+*.json
+
 # Pickle files
 *.pkl
 *.npy

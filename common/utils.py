@@ -1,11 +1,8 @@
 from typing import Dict, List, TypeVar
 
 import torch
-import torch.nn as nn
 from transformers.image_processing_base import BatchFeature
 from transformers.tokenization_utils_base import BatchEncoding
-
-from common.baselines import Softmax
 
 T = TypeVar("T")
 

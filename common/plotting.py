@@ -21,7 +21,7 @@ def get_color_from_string(s: str) -> tuple[float, float, float]:
     return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))  # type: ignore
 
 
-def plot(results: list[dict], metric_name: str = "accuracy", title: str = ""):
+def plot_results(results: list[dict], metric_name: str = "accuracy", title: str = ""):
     """
     Plots a metric vs. FLOPs for different attention types.
 
@@ -36,9 +36,9 @@ def plot(results: list[dict], metric_name: str = "accuracy", title: str = ""):
     plotted_types = {}  # To store handles for the legend
 
     for result in results:
-        flops = result["total_attention_bmm_flops"]
+        flops = result["result"]["total_attention_bmm_flops"]
         attention_type = result["attention_type"]
-        quality = result[metric_name]
+        quality = result["result"][metric_name]
         color = get_color_from_string(attention_type)
 
         # Plot scatter point
@@ -58,54 +58,7 @@ def plot(results: list[dict], metric_name: str = "accuracy", title: str = ""):
     ax.set_xlabel("Total Attention FLOPs")
     ax.set_ylabel(metric_name.capitalize())
     ax.set_title(title)
-    ax.legend(handles=plotted_types.values(), title="Attention Type")
+    ax.legend(handles=plotted_types.values())
     ax.grid(True, linestyle="--", alpha=0.6)
 
     return fig
-    # plt.tight_layout()
-    # plt.show()
-
-
-if __name__ == "__main__":
-
-    # --- Example Usage ---
-    # Example data: A list of dictionaries, each representing a model run
-    # Each dictionary needs:
-    # - 'attention_type': The name of the attention mechanism used.
-    # - 'total_attention_bmm_flops': The calculated FLOPs for the attention part.
-    # - A metric key (e.g., 'accuracy'): The performance metric value.
-
-    example_results = [
-        {
-            "attention_type": "softmax",
-            "total_attention_bmm_flops": 1.5e10,
-            "accuracy": 0.75,
-            "latency": 100,
-        },
-        {
-            "attention_type": "monarch",
-            "total_attention_bmm_flops": 0.8e10,
-            "accuracy": 0.72,
-            "latency": 60,
-        },
-        {
-            "attention_type": "linformer",
-            "total_attention_bmm_flops": 0.5e10,
-            "accuracy": 0.70,
-            "latency": 50,
-        },
-        {
-            "attention_type": "performer",
-            "total_attention_bmm_flops": 0.6e10,
-            "accuracy": 0.71,
-            "latency": 55,
-        },
-        # Add more results as needed...
-    ]
-
-    # Call the plot function with the example data
-    fig = plot(example_results, metric_name="accuracy")
-    fig.savefig("example.pdf", bbox_inches="tight")
-
-    # You could also plot a different metric if it's in your results dicts:
-    # plot(example_results, metric_name="latency")

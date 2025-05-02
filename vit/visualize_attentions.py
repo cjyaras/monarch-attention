@@ -2,6 +2,7 @@ import os
 
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 
 from common.baselines import Softmax
 from ma.ma_history import monarch_attention_history, monarch_matrix
@@ -10,6 +11,10 @@ from vit.extract import extract_query_key
 from vit.model import AttentionType
 
 Tensor = torch.Tensor
+
+
+def softmax_attention(query: Tensor, key: Tensor) -> Tensor:
+    return F.softmax(query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5, dim=-1)
 
 
 @torch.no_grad()
@@ -29,65 +34,33 @@ def main():
     query = torch.load("vit/query.pt")
     key = torch.load("vit/key.pt")
 
-    layer = 8
-    head = 5
+    # layer = 1
+    # head = 5
 
-    query = query[0, layer, head, 1:]
-    key = key[0, layer, head, 1:]
+    # layer = 3
+    # head = 3
 
-    softmax_matrix = Softmax().get_matrix(query, key)
-    monarch_matrix_history = monarch_attention_history(query, key, T=1, B=14)
+    # layer, head = 2, 10
+
+    layer, head = 4, 2
+
+    query = query[0, layer, head, 1:50]
+    key = key[0, layer, head, 1:50]
+
+    softmax_matrix = softmax_attention(query, key)
+    monarch_matrix_history = monarch_attention_history(query, key, T=1, B=7)
 
     fig, ax = plt.subplots(1, len(monarch_matrix_history) + 1)
     for i, m in enumerate(monarch_matrix_history):
         ax[i].imshow(m.cpu().numpy())
-        ax[i].set_title(f"Step {i}")
+        ax[i].set_title(f"Monarch (step {i+1})")
         ax[i].axis("off")
     ax[-1].imshow(softmax_matrix.cpu().numpy())
     ax[-1].set_title(f"Softmax")
     ax[-1].axis("off")
-    # fig.savefig("monarch_history.pdf", bbox_inches="tight")
-    fig.savefig("monarch_history.pdf", bbox_inches="tight")
+    fig.savefig("figures/monarch_history.pdf", bbox_inches="tight")
 
     plt.imshow(monarch_matrix_history[0].cpu().numpy())
-    # monarch_matrix_history = SobaMonarch(14, 2, PadType.pre).get_matrix(
-    #     query, key, attention_mask=attention_mask
-    # )
-
-    # fig, ax = plt.subplots(1, 2)
-    # ax[0].imshow(softmax_matrix[0, 0])
-    # ax[1].imshow(soba_monarch_matrix[0, 0])
-    # plt.show()
-
-    # softmax_matrix = Softmax().get_matrix(query, key)
-    # soba_monarch_matrix = SobaMonarch(14, 4, PadType.pre).get_matrix(
-    #     query, key, return_history=True
-    # )
-    # ones_soba_monarch_matrix = SobaMonarch(
-    #     14, 4, PadType.pre, InitType.ones
-    # ).get_matrix(query, key, return_history=True)
-
-    # pre_attn_scores = query @ key.transpose(-2, -1) / sqrt(query.shape[-1])
-
-    # softmax_value = float(softmax_varational_objective(softmax_matrix, pre_attn_scores))
-
-    # eye_soba_monarch_value = torch.vmap(
-    #     softmax_varational_objective, in_dims=(0, None)
-    # )(eye_soba_monarch_matrix, pre_attn_scores)
-
-    # plt.plot(eye_soba_monarch_value, label="Eye")
-    # plt.plot(ones_soba_monarch_value, label="Ones")
-    # plt.axhline(softmax_value, color="red", label="Softmax")
-    # plt.legend()
-    # plt.show()
-
-    # fig, ax = plt.subplots(1, 3)
-    # ax[0].imshow(softmax_matrix)
-    # ax[1].imshow(eye_soba_monarch_matrix[-1])
-    # ax[1].set_title(f"Eye")
-    # ax[2].imshow(ones_soba_monarch_matrix[-1])
-    # ax[2].set_title(f"Ones")
-    # plt.show()
 
 
 if __name__ == "__main__":

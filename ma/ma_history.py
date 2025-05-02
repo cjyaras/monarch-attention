@@ -24,7 +24,6 @@ def monarch_attention_history(q: Tensor, k: Tensor, T: int, B: int) -> list[Tens
     L = torch.stack(B * [torch.eye(M, device=q.device)])
 
     history = []
-    history.append(monarch_matrix(L, L))
 
     # Alternating maximization for L, R
     for t in range(T):
