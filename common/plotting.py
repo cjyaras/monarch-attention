@@ -36,9 +36,10 @@ def plot_results(
 
     plotted_types = {}  # To store handles for the legend
     all_quality = [r["result"][metric_name] for r in results]
-
-    min_quality = min(all_quality) if all_quality else 0
-    max_quality = max(all_quality) if all_quality else 1
+    min_quality = 0
+    max_quality = 100
+    # min_quality = min(all_quality) if all_quality else 0
+    # max_quality = max(all_quality) if all_quality else 1
     quality_range = max_quality - min_quality
     padding = quality_range * 0.05  # Add 5% padding
 
@@ -138,12 +139,17 @@ def plot_results(
     # Sort results by attention type alphabetical
     results = sorted(results, key=lambda x: x["attention_type"])
 
+    softmax_flops = 0
+
     for result in results:
         flops = result["result"]["total_attention_bmm_flops"]
         attention_type = result["attention_type"]
         quality = result["result"][metric_name]
         color = get_color_from_string(attention_type)
         label = attention_type if attention_type not in plotted_types else ""
+
+        if attention_type == "softmax":
+            softmax_flops = flops
 
         # Plot on all relevant axes
         for ax in axes_list:
@@ -164,7 +170,9 @@ def plot_results(
     if plotted_types:  # Only add legend if there are items to plot
         if not break_needed:
             # Standard plot: Legend on the single axis
-            axes_list[0].legend(handles=plotted_types.values(), loc="best")
+            axes_list[0].legend(
+                handles=plotted_types.values(), loc="best", fontsize="small"
+            )
         else:
             # Broken axis plot: Place legend outside the axes, to the right
 
@@ -177,6 +185,8 @@ def plot_results(
                 labels=plotted_types.keys(),  # Use keys for labels with fig.legend
                 loc="center left",  # Anchor point on the legend box
                 bbox_to_anchor=(0.8, 0.5),
+                fontsize="small",
             )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
+    # ax.set_xlim(0, softmax_flops * 1.1)
     return fig

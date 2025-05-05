@@ -4,10 +4,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
 from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
-
-from common.utils import get_device
 
 Tensor = torch.Tensor
 
@@ -103,6 +100,7 @@ class Linformer(Baseline):
             key = attention_mask[:, None, :, None] * key
             value = attention_mask[:, None, :, None] * value
 
+        # TODO: Check if this projection is correct
         R = torch.randn(self.rank, seq_len).to(query.device) / math.sqrt(self.rank)
 
         key = torch.matmul(R, key)
@@ -117,7 +115,7 @@ class Linformer(Baseline):
 
 class KernelAttention(Baseline):
 
-    def phi(self, x: Tensor) -> Tensor:
+    def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
         raise NotImplementedError()
 
     def forward(
@@ -128,50 +126,46 @@ class KernelAttention(Baseline):
         attention_mask: Tensor | None = None,
     ) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = query.shape
-        query = query / math.sqrt(head_dim)
 
-        phi_q = self.phi(query)
-        phi_k = self.phi(key)
+        query = query / math.sqrt(math.sqrt(head_dim))
+        key = key / math.sqrt(math.sqrt(head_dim))
 
-        mask = None
+        phi_q, phi_k = self.transform_qk(query, key)
+
         if attention_mask is not None:
-            # Input mask shape: (B, N) -> Output mask shape: (B, 1, N, 1)
-            mask = attention_mask.unsqueeze(1).unsqueeze(-1).to(dtype=phi_k.dtype)
-            # Apply mask to phi_k: effectively zeros out contributions from padding tokens
-            phi_k = phi_k * mask
+            phi_k = phi_k * attention_mask[:, None, :, None]
+            phi_q = phi_q * attention_mask[:, None, :, None]
 
         # --- Linear Attention Computation ---
         # 1. Compute K'^T @ V term (where K' = phi(K))
         # Einsum: 'bhnd,bhnv->bhdv' where d=d_phi, v=head_dim
-        kv_term = torch.einsum("bhnd,bhnv->bhdv", phi_k, value)  # (B, H, d_phi, d)
+        # kv_term = torch.einsum("bhnd,bhnv->bhdv", phi_k, value)  # (B, H, d_phi, d)
+        kv_term = torch.matmul(phi_k.mT, value)
 
         # 2. Compute Q' @ (K'^T @ V) term (where Q' = phi(Q))
         # Einsum: 'bhnd,bhdv->bhnv'
-        output = torch.einsum("bhnd,bhdv->bhnv", phi_q, kv_term)  # (B, H, N, d)
+        # output = torch.einsum("bhnd,bhdv->bhnv", phi_q, kv_term)  # (B, H, N, d)
+        output = torch.matmul(phi_q, kv_term)
 
         # --- Normalization ---
         # 1. Compute K'^T @ 1s term
-        ones_val = torch.ones(
-            batch_size, num_heads, seq_len, 1, device=value.device, dtype=value.dtype
-        )
-        if mask is not None:
-            # Apply mask to ones as well, so padding tokens don't contribute to sum
-            ones_val = ones_val * mask
+        # ones_val = torch.ones(
+        #     batch_size, num_heads, seq_len, 1, device=value.device, dtype=value.dtype
+        # )
         # Einsum: 'bhnd,bhnz->bhdz' where z=1
-        k_one_term = torch.einsum(
-            "bhnd,bhnz->bhdz", phi_k, ones_val
-        )  # (B, H, d_phi, 1)
+        # k_one_term = torch.einsum(
+        #     "bhnd,bhnz->bhdz", phi_k, ones_val
+        # )  # (B, H, d_phi, 1)
+        k_one_term = torch.sum(phi_k, dim=-2, keepdim=True).mT
 
         # 2. Compute Q' @ (K'^T @ 1s) term
         # Einsum: 'bhnd,bhdz->bhnz'
-        normalizer = torch.einsum("bhnd,bhdz->bhnz", phi_q, k_one_term)  # (B, H, N, 1)
-
-        print(output)
-        exit()
+        # normalizer = torch.einsum("bhnd,bhdz->bhnz", phi_q, k_one_term)  # (B, H, N, 1)
+        normalizer = torch.matmul(phi_q, k_one_term)
 
         # 3. Normalize output
         # Add epsilon to prevent division by zero
-        output = output / (normalizer + 1e-6)
+        output = output / (normalizer + 1e-8)
 
         return output
 
@@ -182,13 +176,18 @@ class Performer(KernelAttention):
         super().__init__()
         self.rank = rank
 
-    def phi(self, x: Tensor) -> Tensor:
-        dim = x.shape[-1]
-        h_out = torch.exp(-torch.linalg.norm(x, dim=-1) ** 2 / 2)
-        omega = torch.randn(dim, self.rank).to(x.device)
-        f_out = torch.exp(torch.matmul(x, omega))
-        out = (1.0 / math.sqrt(self.rank)) * h_out.unsqueeze(-1) * f_out
-        return out
+    def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
+        dim = q.shape[-1]
+        omega = torch.randn(dim, self.rank).to(q.device)
+        phi_q = torch.exp(
+            torch.matmul(q, omega) - torch.linalg.norm(q, dim=-1, keepdim=True) ** 2 / 2
+        )
+        phi_q = 1.0 / math.sqrt(self.rank) * phi_q
+        phi_k = torch.exp(
+            torch.matmul(k, omega) - torch.linalg.norm(k, dim=-1, keepdim=True) ** 2 / 2
+        )
+        phi_k = 1.0 / math.sqrt(self.rank) * phi_k
+        return phi_q, phi_k
 
 
 class Cosformer(KernelAttention):
@@ -208,6 +207,9 @@ class Cosformer(KernelAttention):
         )
         return out
 
+    def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
+        return self.phi(q), self.phi(k)
+
     def _get_idx(self, seq_len):
         return (np.pi / 2) * torch.arange(1, seq_len + 1).reshape(1, 1, -1, 1)
 
@@ -215,32 +217,18 @@ class Cosformer(KernelAttention):
 class LinearAttention(KernelAttention):
 
     def phi(self, x: Tensor) -> Tensor:
-        return 1 + F.elu(x)
+        # return 1 + F.elu(x)
+        return F.relu(x)
+
+    def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
+        return self.phi(q), self.phi(k)
 
 
 # Implementation inspired by https://github.com/mlpen/Nystromformer/blob/main/code/attention_nystrom.py
 class Nystromformer(Baseline):
-    def __init__(
-        self,
-        num_landmarks: int,
-        num_heads: int | None = None,
-        conv_kernel_size: int | None = None,
-    ):
+    def __init__(self, num_landmarks: int):
         super().__init__()
-
         self.num_landmarks = num_landmarks  # 'm' in paper
-        if conv_kernel_size is not None:
-            assert num_heads is not None
-            self.conv_ = nn.Conv2d(
-                in_channels=num_heads,
-                out_channels=num_heads,
-                kernel_size=conv_kernel_size,
-                padding=(conv_kernel_size // 2, 0),
-                bias=False,
-                groups=num_heads,
-            )
-        else:
-            self.conv_ = None
 
     def forward(
         self,
@@ -249,48 +237,20 @@ class Nystromformer(Baseline):
         value: Tensor,
         attention_mask: Tensor | None = None,
     ) -> Tensor:
-        assert query.shape == key.shape and key.shape == value.shape
-        batch_size, num_heads, seq_len, head_dim = query.shape
-
-        # Vanilla attention
-        if self.num_landmarks == seq_len:
-            attention_probs = self._compute_vanilla_attn_mat(query, key, attention_mask)
-            out = torch.matmul(attention_probs, value)
-        # Nystromformer attention
-        else:
-            F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(
-                query, key, attention_mask
-            )
-            out = torch.matmul(
-                F_tilde, torch.matmul(A_tilde, torch.matmul(B_tilde, value))
-            )
-
-            if self.conv_ is not None:
-                out += self.conv_(value)
-
-        return out
-
-    def _compute_vanilla_attn_mat(
-        self, query: Tensor, key: Tensor, attention_mask: Tensor | None = None
-    ) -> Tensor:
-        batch_size, num_heads, seq_len, head_dim = query.shape
-
-        attention_scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(
-            head_dim
-        )  # Compute attention scores
-        out = F.softmax(attention_scores, dim=-1)
-        if attention_mask is not None:  # Apply mask if needed
-            assert attention_mask.shape == (batch_size, seq_len)
-            valid_attention_mask = self._get_valid_mask(attention_mask)
-            assert valid_attention_mask is not None
-            out = self._renormalize(self._mask_vanilla_attn(out, valid_attention_mask))
-
+        F_tilde, A_tilde, B_tilde = self._compute_nystrom_factors(
+            query, key, attention_mask
+        )
+        out = torch.matmul(F_tilde, torch.matmul(A_tilde, torch.matmul(B_tilde, value)))
         return out
 
     def _compute_nystrom_factors(
         self, query: Tensor, key: Tensor, attention_mask: Tensor | None = None
     ) -> tuple[Tensor, Tensor, Tensor]:
         batch_size, num_heads, seq_len, head_dim = query.shape
+
+        if attention_mask is not None:
+            query = attention_mask[:, None, :, None] * query
+            key = attention_mask[:, None, :, None] * key
 
         # Compute landmarks for queries, keys
         query_lm = self._compute_landmarks(query)
@@ -306,21 +266,18 @@ class Nystromformer(Baseline):
                 dim=-1,
             )
         )
-        B_tilde = F.softmax(
-            torch.matmul(query_lm, key.transpose(-2, -1)) / math.sqrt(head_dim), dim=-1
-        )
-
-        # Apply mask if needed
         if attention_mask is not None:
-            assert attention_mask.shape == (batch_size, seq_len)
-            valid_attention_mask = self._get_valid_mask(attention_mask)
-            assert valid_attention_mask is not None
-            F_tilde, B_tilde = self._mask_nystrom_factors(
-                F_tilde, B_tilde, valid_attention_mask
+            B_tilde = F.softmax(
+                torch.matmul(query_lm, key.transpose(-2, -1)) / math.sqrt(head_dim)
+                + (1.0 - attention_mask[:, None, None, :])
+                * torch.finfo(query.dtype).min,
+                dim=-1,
             )
-
-            F_tilde = self._renormalize(F_tilde)
-            B_tilde = self._renormalize(B_tilde)
+        else:
+            B_tilde = F.softmax(
+                torch.matmul(query_lm, key.transpose(-2, -1)) / math.sqrt(head_dim),
+                dim=-1,
+            )
 
         return F_tilde, A_tilde, B_tilde
 
@@ -356,22 +313,3 @@ class Nystromformer(Baseline):
             out = 0.25 * torch.matmul(out, term3)
 
         return out
-
-    def _get_valid_mask(self, mask: Tensor | None) -> Tensor | None:
-        if mask is not None:
-            mask = rearrange(mask, "b s -> b 1 1 s")
-        return mask
-
-    def _mask_vanilla_attn(self, probs: Tensor, mask: Tensor) -> Tensor:
-        return mask * probs * mask.transpose(-2, -1)
-
-    def _mask_nystrom_factors(
-        self, F: Tensor, B: Tensor, mask: Tensor
-    ) -> tuple[Tensor, Tensor]:
-        return (
-            F * mask.transpose(-2, -1),
-            B * mask,
-        )  # B is already of shape (batch_size, num_heads, num_landmarks, seq_len)
-
-    def _renormalize(self, mat: Tensor):
-        return mat / torch.sum(mat, dim=-1, keepdim=True)

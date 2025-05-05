@@ -3,7 +3,7 @@ import torch
 from roberta.config import AttentionType, PadType, get_config
 from roberta.evaluation import Evaluator
 
-NUM_SAMPLES = 16
+NUM_SAMPLES = 1024
 BATCH_SIZE = 8
 SAVE_DIR = "roberta/results"
 
@@ -27,15 +27,15 @@ def main():
         }
 
     # Softmax
-    config = get_config()
-    config.attention_type = AttentionType.softmax
-    config.enable_flash_attention = False
-    print(config.attention_type)
+    # config = get_config()
+    # config.attention_type = AttentionType.softmax
+    # config.enable_flash_attention = False
+    # print(config.attention_type)
     # evaluator.evaluate_and_save(config)
 
     # Monarch
     for num_steps in [1]:
-        for block_size in [24, 48, 64, 128]:
+        for block_size in [24, 48, 96, 128]:
             config = get_config()
             config.attention_type = get_mixed_type(
                 AttentionType.monarch_attention, AttentionType.softmax
@@ -44,52 +44,52 @@ def main():
             config.pad_type = PadType.post
             config.num_steps = num_steps
             print(config.attention_type[0], num_steps, block_size)
-            # evaluator.evaluate_and_save(config)
+            evaluator.evaluate_and_save(config)
 
-    # Linformer
-    for rank in range(16, 128, 16):
-        config = get_config()
-        config.attention_type = get_mixed_type(
-            AttentionType.linformer, AttentionType.softmax
-        )
-        config.rank = rank
-        print(config.attention_type[0], rank)
-        # evaluator.evaluate_and_save(config)
+    # # Linformer
+    # for rank in range(32, 192 + 1, 32):
+    #     config = get_config()
+    #     config.attention_type = get_mixed_type(
+    #         AttentionType.linformer, AttentionType.softmax
+    #     )
+    #     config.rank = rank
+    #     print(config.attention_type[0], rank)
+    #     evaluator.evaluate_and_save(config)
 
-    # Performer
-    for rank in range(16, 64, 8):
-        config = get_config()
-        config.attention_type = get_mixed_type(
-            AttentionType.performer, AttentionType.softmax
-        )
-        config.rank = rank
-        print(config.attention_type[0], rank)
-        evaluator.evaluate_and_save(config)
+    # # Performer
+    # for rank in range(32, 192 + 1, 32):
+    #     config = get_config()
+    #     config.attention_type = get_mixed_type(
+    #         AttentionType.performer, AttentionType.softmax
+    #     )
+    #     config.rank = rank
+    #     print(config.attention_type[0], rank)
+    #     evaluator.evaluate_and_save(config)
 
-    # Nystromformer
-    for rank in range(16, 56, 8):
-        config = get_config()
-        config.attention_type = get_mixed_type(
-            AttentionType.nystromformer, AttentionType.softmax
-        )
-        config.rank = rank
-        print(config.attention_type[0], rank)
-        evaluator.evaluate_and_save(config)
+    # # Nystromformer
+    # for rank in range(16, 64 + 1, 16):
+    #     config = get_config()
+    #     config.attention_type = get_mixed_type(
+    #         AttentionType.nystromformer, AttentionType.softmax
+    #     )
+    #     config.rank = rank
+    #     print(config.attention_type[0], rank)
+    #     evaluator.evaluate_and_save(config)
 
-    # Cosformer
-    config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.cosformer, AttentionType.softmax
-    )
-    print(config.attention_type[0])
+    # # Cosformer
+    # config = get_config()
+    # config.attention_type = get_mixed_type(
+    #     AttentionType.cosformer, AttentionType.softmax
+    # )
+    # print(config.attention_type[0])
     # evaluator.evaluate_and_save(config)
 
-    # LinearAttention
-    config = get_config()
-    config.attention_type = get_mixed_type(
-        AttentionType.linear_attention, AttentionType.softmax
-    )
-    print(config.attention_type[0])
+    # # LinearAttention
+    # config = get_config()
+    # config.attention_type = get_mixed_type(
+    #     AttentionType.linear_attention, AttentionType.softmax
+    # )
+    # print(config.attention_type[0])
     # evaluator.evaluate_and_save(config)
 
 

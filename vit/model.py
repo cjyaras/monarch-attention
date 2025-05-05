@@ -43,19 +43,14 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
         case AttentionType.monarch_attention:
             return (config.block_size, config.num_steps, config.pad_type)
 
-        case AttentionType.linformer:
+        case (
+            AttentionType.linformer
+            | AttentionType.performer
+            | AttentionType.nystromformer
+        ):
             return (config.rank,)
 
-        case AttentionType.performer:
-            return (config.rank,)
-
-        case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads)
-
-        case AttentionType.cosformer:
-            return ()
-
-        case AttentionType.linear_attention:
+        case AttentionType.cosformer | AttentionType.linear_attention:
             return ()
 
         case _:

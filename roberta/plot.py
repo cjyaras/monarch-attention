@@ -17,7 +17,7 @@ def main():
         results,
         metric_name="f1",
         title="RoBERTa SQuAD",
-        y_break_limits=(25, 75),  # Break the axis between 0.3 and 0.7
+        # y_break_limits=(25, 75),  # Break the axis between 0.3 and 0.7
         y_break_vspace=0.5,  # Set vertical space between subplots
     )
     fig.savefig("figures/roberta_results.pdf", bbox_inches="tight")
