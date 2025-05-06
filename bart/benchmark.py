@@ -3,8 +3,8 @@ import torch
 from bart.config import AttentionType, get_config
 from bart.evaluation import Evaluator
 
-NUM_SAMPLES = 1
-BATCH_SIZE = 1 
+NUM_SAMPLES = None
+BATCH_SIZE = 32
 SAVE_DIR = "bart/results"
 
 def print_results(res):
@@ -49,15 +49,6 @@ def main():
         print_results(res)
         # evaluator.evaluate_and_save(config)
 
-        # Monarch
-        config = get_config()
-        config.attention_type = get_mixed_type(AttentionType.monarch, AttentionType.softmax)
-        config.num_steps = 2
-        config.block_size = 64
-        print(config.attention_type)
-        res = evaluator.evaluate(config)
-        print_results(res)
-        # evaluator.evaluate_and_save(config)
 
 
         # Nystromformer
@@ -71,6 +62,20 @@ def main():
         res = evaluator.evaluate(config)
         print_results(res)
         #evaluator.evaluate_and_save(config)
+
+
+        # Monarch
+        config = get_config()
+        config.attention_type = get_mixed_type(
+            AttentionType.monarch_attention, AttentionType.softmax
+        )
+        config.num_steps = 2
+        config.block_size = 64
+        print(config.attention_type)
+        res = evaluator.evaluate(config)
+        print_results(res)
+        # evaluator.evaluate_and_save(config)
+
 
 
 if __name__ == "__main__":

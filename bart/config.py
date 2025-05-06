@@ -8,11 +8,13 @@ from ma.monarch_attention import PadType
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    monarch = "monarch"
+    monarch_attention = "monarch-attention"
+    hybrid = "hybrid"
     linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
     cosformer = "cosformer"
+    linear_attention = "linear-attention"
 
 
 class CustomBartConfig(BartConfig):

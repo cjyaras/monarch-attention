@@ -13,19 +13,27 @@ from transformers.models.bart.modeling_bart import (
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax
-from common.utils import get_device, maybe_compile
+from common.baselines import (
+    Cosformer,
+    LinearAttention,
+    Linformer,
+    Nystromformer,
+    Performer,
+    Softmax,
+)
+from common.utils import get_device
 from ma.monarch_attention import MonarchAttention
 from bart.config import AttentionType, CustomBartConfig
 
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
-    AttentionType.monarch: MonarchAttention,
+    AttentionType.monarch_attention: MonarchAttention,
     AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
     AttentionType.cosformer: Cosformer,
+    AttentionType.linear_attention: LinearAttention,
 }
 
 
@@ -36,27 +44,23 @@ def prepare_args(attention_type: AttentionType, config: CustomBartConfig) -> Tup
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
 
-        case AttentionType.monarch:
-            return (
-                config.block_size,
-                config.num_steps,
-                config.pad_type,
-            )
+        case AttentionType.monarch_attention:
+            return (config.block_size, config.num_steps, config.pad_type)
 
-        case AttentionType.linformer:
-            return (config.rank, config.seq_len, config.share_kv)
+        case (
+            AttentionType.linformer
+            | AttentionType.performer
+            | AttentionType.nystromformer
+        ):
+            return (config.rank,)
 
-        case AttentionType.performer:
-            return (config.rank, config.estimator_type, config.ortho_features)
-
-        case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
-
-        case AttentionType.cosformer:
+        case AttentionType.cosformer | AttentionType.linear_attention:
             return ()
 
         case _:
             raise ValueError(f"Invalid attention type: {attention_type}")
+
+
 
 
 class CustomBartAttention(BartAttention):
@@ -91,7 +95,6 @@ class CustomBartAttention(BartAttention):
             module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
             self.attn_module = module(*prepare_args(config.attention_type, config))
 
-        maybe_compile(self.attn_module)
 
     def forward(
         self,
