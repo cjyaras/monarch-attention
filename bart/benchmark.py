@@ -19,6 +19,7 @@ def print_results(res):
 @torch.no_grad()
 def main():
     for max_length, nystrom_rank in [(1024, 64), (2048, 80), (4096, 112), (8192, 160)]:
+        print(f"Max Length: {max_length}")
         evaluator = Evaluator(
             num_samples=NUM_SAMPLES,
             batch_size=BATCH_SIZE,
