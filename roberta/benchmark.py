@@ -47,14 +47,14 @@ def main():
             evaluator.evaluate_and_save(config)
 
     # Linformer
-    for rank in range(32, 192 + 1, 32):
-        config = get_config()
-        config.attention_type = get_mixed_type(
-            AttentionType.linformer, AttentionType.softmax
-        )
-        config.rank = rank
-        print(config.attention_type[0], rank)
-        evaluator.evaluate_and_save(config)
+    # for rank in range(32, 192 + 1, 32):
+    #     config = get_config()
+    #     config.attention_type = get_mixed_type(
+    #         AttentionType.linformer, AttentionType.softmax
+    #     )
+    #     config.rank = rank
+    #     print(config.attention_type[0], rank)
+    #     evaluator.evaluate_and_save(config)
 
     # Performer
     for rank in range(32, 192 + 1, 32):

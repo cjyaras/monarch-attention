@@ -217,8 +217,8 @@ class Cosformer(KernelAttention):
 class LinearAttention(KernelAttention):
 
     def phi(self, x: Tensor) -> Tensor:
-        # return 1 + F.elu(x)
-        return F.relu(x)
+        return 1 + F.elu(x)
+        # return F.relu(x)
 
     def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
         return self.phi(q), self.phi(k)

@@ -37,12 +37,12 @@ def main():
             evaluator.evaluate_and_save(config)
 
     # Linformer
-    for rank in range(16, 96 + 1, 16):
-        config = get_config()
-        config.attention_type = AttentionType.linformer
-        config.rank = rank
-        print(config.attention_type, rank)
-        evaluator.evaluate_and_save(config)
+    # for rank in range(16, 96 + 1, 16):
+    #     config = get_config()
+    #     config.attention_type = AttentionType.linformer
+    #     config.rank = rank
+    #     print(config.attention_type, rank)
+    #     evaluator.evaluate_and_save(config)
 
     # Performer
     for rank in range(16, 96 + 1, 16):

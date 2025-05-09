@@ -2,19 +2,31 @@ import os
 
 import matplotlib.pyplot as plt
 import torch
-import torch.nn.functional as F
 
-from common.baselines import Softmax
-from ma.ma_history import monarch_attention_history, monarch_matrix
+from common.baselines import (
+    Cosformer,
+    LinearAttention,
+    Nystromformer,
+    Performer,
+    Softmax,
+)
+from ma.monarch_attention import MonarchAttention, PadType
 from vit.config import get_config
 from vit.extract import extract_query_key
 from vit.model import AttentionType
 
 Tensor = torch.Tensor
 
+plt.rcParams.update(
+    {
+        "font.family": "DejaVu Sans Mono",
+        "font.size": 12,
+    }
+)
 
-def softmax_attention(query: Tensor, key: Tensor) -> Tensor:
-    return F.softmax(query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5, dim=-1)
+
+# def softmax_attention(query: Tensor, key: Tensor) -> Tensor:
+#     return F.softmax(query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5, dim=-1)
 
 
 @torch.no_grad()
@@ -42,25 +54,44 @@ def main():
 
     # layer, head = 2, 10
 
-    layer, head = 4, 2
+    layer, head = 3, 3
 
-    query = query[0, layer, head, 1:50]
-    key = key[0, layer, head, 1:50]
+    # query = query[0, layer, head, 1:50][None, None, ...]
+    # key = key[0, layer, head, 1:50][None, None, ...]
 
-    softmax_matrix = softmax_attention(query, key)
-    monarch_matrix_history = monarch_attention_history(query, key, T=1, B=7)
+    query = query[0, layer, head, 1:][None, None, ...]
+    key = key[0, layer, head, 1:][None, None, ...]
 
-    fig, ax = plt.subplots(1, len(monarch_matrix_history) + 1)
-    for i, m in enumerate(monarch_matrix_history):
-        ax[i].imshow(m.cpu().numpy())
-        ax[i].set_title(f"Monarch (step {i+1})")
-        ax[i].axis("off")
-    ax[-1].imshow(softmax_matrix.cpu().numpy())
-    ax[-1].set_title(f"Softmax")
-    ax[-1].axis("off")
-    fig.savefig("figures/monarch_history.pdf", bbox_inches="tight")
+    attention_maps = []
 
-    plt.imshow(monarch_matrix_history[0].cpu().numpy())
+    model_names = [
+        "cosformer",
+        "linear-attention",
+        "performer",
+        "nystromformer",
+        "monarch-attention",
+        "softmax",
+    ]
+
+    for model in [
+        Cosformer(),
+        LinearAttention(),
+        Performer(64),
+        Nystromformer(14),
+        MonarchAttention(14, 2, PadType.pre),
+        Softmax(),
+    ]:
+        attention_maps.append(model.get_matrix(query, key)[0, 0])
+
+    fig, ax = plt.subplots(1, len(attention_maps), figsize=(len(attention_maps) * 4, 4))
+
+    for i, m in enumerate(attention_maps):
+        ax[i].imshow(m.cpu().numpy(), cmap="GnBu")
+        ax[i].set_title(model_names[i])
+        ax[i].set_xticks([])
+        ax[i].set_yticks([])
+
+    fig.savefig("figures/attention_maps.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

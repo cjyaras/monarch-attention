@@ -13,13 +13,7 @@ def main():
             result = json.load(f)
             results.append(result)
 
-    fig = plot_results(
-        results,
-        metric_name="top-5 accuracy",
-        title="ViT ImageNet",
-        # y_break_limits=(15, 55),
-        y_break_vspace=0.5,
-    )
+    fig = plot_results(results, metric_name="top-5 accuracy", title="ViT ImageNet")
     fig.savefig("figures/vit_results.pdf", bbox_inches="tight")
 
 
