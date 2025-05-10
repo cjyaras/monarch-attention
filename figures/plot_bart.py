@@ -14,13 +14,22 @@ def hex_color_to_tuple(hex_color: str) -> tuple[float, float, float]:
 
 
 # Original colors map
+# colors = {
+#     "monarch-attention": hex_color_to_tuple("#332288"),
+#     "performer": hex_color_to_tuple("#44AA99"),  # Not used in BART data
+#     "cosformer": hex_color_to_tuple("#88CCEE"),  # Not used in BART data
+#     "linear-attention": hex_color_to_tuple("#DDCC77"),  # Not used in BART data
+#     "nystromformer": hex_color_to_tuple("#AA4499"),
+#     "softmax": hex_color_to_tuple("#882255"),
+# }
+
 colors = {
-    "monarch-attention": hex_color_to_tuple("#332288"),
-    "performer": hex_color_to_tuple("#44AA99"),  # Not used in BART data
-    "cosformer": hex_color_to_tuple("#88CCEE"),  # Not used in BART data
-    "linear-attention": hex_color_to_tuple("#DDCC77"),  # Not used in BART data
-    "nystromformer": hex_color_to_tuple("#AA4499"),
-    "softmax": hex_color_to_tuple("#882255"),
+    "monarch-attention": hex_color_to_tuple("#E69F00"),
+    "performer": hex_color_to_tuple("#CC79A7"),
+    "cosformer": hex_color_to_tuple("#56B4E9"),
+    "linear-attention": hex_color_to_tuple("#D55E00"),
+    "nystromformer": hex_color_to_tuple("#0072B2"),
+    "softmax": hex_color_to_tuple("#009E73"),
 }
 
 # Filter colors for those used in BART plot and define order for legend
@@ -134,6 +143,8 @@ def main():
                 linestyle="None",  # Use a consistent marker for color legend part
                 markersize=10,
                 label=data["label"],
+                markeredgecolor="black",
+                markeredgewidth=1.5,
             )
         )
 
@@ -148,6 +159,8 @@ def main():
                 linestyle="None",  # Use a neutral color
                 markersize=10,
                 label=marker_legend_labels[point_idx],
+                markeredgecolor="black",
+                markeredgewidth=1.5,
             )
         )
 

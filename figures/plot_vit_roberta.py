@@ -38,13 +38,21 @@ def get_color_from_string(s: str) -> tuple[float, float, float]:
 
 
 # assign color for each method
+# colors = {
+#     "monarch-attention": hex_color_to_tuple("#332288"),
+#     "performer": hex_color_to_tuple("#44AA99"),
+#     "cosformer": hex_color_to_tuple("#88CCEE"),
+#     "linear-attention": hex_color_to_tuple("#DDCC77"),
+#     "nystromformer": hex_color_to_tuple("#AA4499"),
+#     "softmax": hex_color_to_tuple("#882255"),
+# }
 colors = {
-    "monarch-attention": hex_color_to_tuple("#332288"),
-    "performer": hex_color_to_tuple("#44AA99"),
-    "cosformer": hex_color_to_tuple("#88CCEE"),
-    "linear-attention": hex_color_to_tuple("#DDCC77"),
-    "nystromformer": hex_color_to_tuple("#AA4499"),
-    "softmax": hex_color_to_tuple("#882255"),
+    "monarch-attention": hex_color_to_tuple("#E69F00"),
+    "performer": hex_color_to_tuple("#CC79A7"),
+    "cosformer": hex_color_to_tuple("#56B4E9"),
+    "linear-attention": hex_color_to_tuple("#D55E00"),
+    "nystromformer": hex_color_to_tuple("#0072B2"),
+    "softmax": hex_color_to_tuple("#009E73"),
 }
 # colors = {method: get_color_from_string(method) for method in ordering.keys()}
 
