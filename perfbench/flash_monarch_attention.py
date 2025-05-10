@@ -656,7 +656,7 @@ def flash_monarch_attention(
     B: int,
     pre_pad: bool,
 ) -> Tensor:
-    assert T > 1
+
     check_inputs(q, k, v)
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
@@ -694,24 +694,74 @@ def flash_monarch_attention(
         else (0, 0, 0)
     )
 
-    for t in range(T - 1):
-        is_first_call = t == 0
-        _ar = q if is_first_call else ar
-        _al_cl_kernel[grid_ehm](
-            _ar,
+    if T > 1:
+        for t in range(T - 1):
+            is_first_call = t == 0
+            _ar = q if is_first_call else ar
+            _al_cl_kernel[grid_ehm](
+                _ar,
+                *ar_strides,
+                k,
+                *k_strides,
+                cr,
+                *cr_strides,
+                al,
+                *al_strides,
+                cl,
+                *cl_strides,
+                attn_mask,
+                *attn_mask_strides,
+                *HMBDN,
+                is_first_call=is_first_call,
+                sm_scale=sm_scale,
+                HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
+                BLOCK_B=BLOCK_B,  # type: ignore
+                BLOCK_D=BLOCK_D,  # type: ignore
+                PRE_PAD=pre_pad,  # type: ignore
+                EPS=1e-8,  # type: ignore
+            )
+
+            _ar_cr_kernel[grid_ehb](
+                al,
+                *al_strides,
+                q,
+                *q_strides,
+                cl,
+                *cl_strides,
+                ar,
+                *ar_strides,
+                cr,
+                *cr_strides,
+                attn_mask,
+                *attn_mask_strides,
+                *HMBDN,
+                HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
+                BLOCK_M=BLOCK_M,  # type: ignore
+                BLOCK_D=BLOCK_D,  # type: ignore
+                PRE_PAD=pre_pad,  # type: ignore
+            )
+
+        y = torch.empty_like(al)
+        y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
+
+        _al_y_cl_kernel[grid_ehm](
+            ar,
             *ar_strides,
             k,
             *k_strides,
+            v,
+            *v_strides,
             cr,
             *cr_strides,
             al,
             *al_strides,
+            y,
+            *y_strides,
             cl,
             *cl_strides,
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
-            is_first_call=is_first_call,
             sm_scale=sm_scale,
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_B=BLOCK_B,  # type: ignore
@@ -720,74 +770,74 @@ def flash_monarch_attention(
             EPS=1e-8,  # type: ignore
         )
 
-        _ar_cr_kernel[grid_ehb](
+        z = torch.empty_like(v)
+        z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
+
+        _z_kernel[grid_ehb](
             al,
             *al_strides,
             q,
             *q_strides,
+            y,
+            *y_strides,
             cl,
             *cl_strides,
-            ar,
-            *ar_strides,
-            cr,
-            *cr_strides,
-            attn_mask,
-            *attn_mask_strides,
+            z,
+            *z_strides,
             *HMBDN,
-            HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_M=BLOCK_M,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
         )
+    else:
+        y = torch.empty_like(al)
+        y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
 
-    y = torch.empty_like(al)
-    y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
+        _al_y_cl_kernel[grid_ehm](
+            q,
+            *q_strides,
+            k,
+            *k_strides,
+            v,
+            *v_strides,
+            cr,
+            *cr_strides,
+            al,
+            *al_strides,
+            y,
+            *y_strides,
+            cl,
+            *cl_strides,
+            attn_mask,
+            *attn_mask_strides,
+            *HMBDN,
+            sm_scale=sm_scale,
+            HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
+            BLOCK_B=BLOCK_B,  # type: ignore
+            BLOCK_D=BLOCK_D,  # type: ignore
+            PRE_PAD=pre_pad,  # type: ignore
+            EPS=1e-8,  # type: ignore
+        )
 
-    _al_y_cl_kernel[grid_ehm](
-        ar,
-        *ar_strides,
-        k,
-        *k_strides,
-        v,
-        *v_strides,
-        cr,
-        *cr_strides,
-        al,
-        *al_strides,
-        y,
-        *y_strides,
-        cl,
-        *cl_strides,
-        attn_mask,
-        *attn_mask_strides,
-        *HMBDN,
-        sm_scale=sm_scale,
-        HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
-        BLOCK_B=BLOCK_B,  # type: ignore
-        BLOCK_D=BLOCK_D,  # type: ignore
-        PRE_PAD=pre_pad,  # type: ignore
-        EPS=1e-8,  # type: ignore
-    )
+        z = torch.empty_like(v)
+        z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
 
-    z = torch.empty_like(v)
-    z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
-
-    _z_kernel[grid_ehb](
-        al,
-        *al_strides,
-        q,
-        *q_strides,
-        y,
-        *y_strides,
-        cl,
-        *cl_strides,
-        z,
-        *z_strides,
-        *HMBDN,
-        BLOCK_M=BLOCK_M,  # type: ignore
-        BLOCK_D=BLOCK_D,  # type: ignore
-        PRE_PAD=pre_pad,  # type: ignore
-    )
+        _z_kernel[grid_ehb](
+            al,
+            *al_strides,
+            q,
+            *q_strides,
+            y,
+            *y_strides,
+            cl,
+            *cl_strides,
+            z,
+            *z_strides,
+            *HMBDN,
+            BLOCK_M=BLOCK_M,  # type: ignore
+            BLOCK_D=BLOCK_D,  # type: ignore
+            PRE_PAD=pre_pad,  # type: ignore
+        )
 
     return z
 

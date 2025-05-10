@@ -3,8 +3,8 @@ import torch
 from bart.config import AttentionType, get_config
 from bart.evaluation import Evaluator
 
-NUM_SAMPLES = None
-BATCH_SIZE = 32
+NUM_SAMPLES = None 
+BATCH_SIZE = 4
 SAVE_DIR = "bart/results"
 
 def print_results(res):
@@ -18,8 +18,8 @@ def print_results(res):
 
 @torch.no_grad()
 def main():
-    for max_length, nystrom_rank in [(1024, 64), (2048, 80), (4096, 112), (8192, 160)]:
-        print(f"Max Length: {max_length}")
+    for max_length, nystrom_rank, block_size, num_steps in [(1024, 64, 32, 3), (2048, 80, 32, 2), (4096, 112, 64, 2), (8192, 160, 64, 2)]:
+        print(f"Max Length: {max_length}, nystrom_rank: {nystrom_rank}, block_size: {block_size}, num_steps: {num_steps}")
         evaluator = Evaluator(
             num_samples=NUM_SAMPLES,
             batch_size=BATCH_SIZE,
@@ -70,8 +70,8 @@ def main():
         config.attention_type = get_mixed_type(
             AttentionType.monarch_attention, AttentionType.softmax
         )
-        config.num_steps = 2
-        config.block_size = 64
+        config.num_steps = num_steps
+        config.block_size = block_size
         print(config.attention_type)
         res = evaluator.evaluate(config)
         print_results(res)

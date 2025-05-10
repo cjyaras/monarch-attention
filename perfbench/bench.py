@@ -36,7 +36,7 @@ def benchmark(run_mode, func, *args):
             if i >= num_warmup_iters: torch.cuda.nvtx.range_pop()
         torch.cuda.cudart().cudaProfilerStop()
 
-def sweep_batch(num_heads, seq_len, d):
+def sweep_batch(num_heads, seq_len, d, T):
 
     run_mode = RunMode.NORMAL
 
@@ -56,7 +56,7 @@ def sweep_batch(num_heads, seq_len, d):
         b = int(sqrt(seq_len))
 
         try:
-            t1 = benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b)
+            t1 = benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b, T)
         except Exception as e:
             print(f"flash_monarch_attention failed: {e}")
             t1 = float("nan")
@@ -226,10 +226,10 @@ if __name__ == "__main__":
     seq_len = 256
     num_heads = 12
     d = 64
-    T = 2
+    T = 1
 
     if args.sweep_batch:
-        sweep_batch(num_heads, seq_len, d)
+        sweep_batch(num_heads, seq_len, d, T)
     elif args.sweep_seq_len:
         sweep_seq_len(batch, num_heads, d, T)
     else:
@@ -246,7 +246,7 @@ if __name__ == "__main__":
             print(f"flash_monarch_attention failed: {e}")
 
         # try:
-        #     benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b)
+        #     benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b, T)
         # except Exception as e:
         #     print(f"fused_flash_monarch_attention failed: {e}")
 
