@@ -107,7 +107,7 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
             normalized_seq["softmax"].append(best_softmax / max_t)
 
     fig, axes = plt.subplots(ncols=2, figsize=(16, 6))
-    ax1, ax2 = axes
+    ax2, ax1 = axes
 
     width = 0.35
     x1 = np.arange(len(batch_sizes))
@@ -166,7 +166,7 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
     fig.subplots_adjust(right=0.75)
     fig.legend(
         handles=[bar1, bar2],
-        labels=["monarch", "softmax"],
+        labels=["monarch-attention", "flash-attention-2"],
         loc="center left",
         bbox_to_anchor=(1.02, 0.5),
     )
