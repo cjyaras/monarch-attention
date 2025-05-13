@@ -1,0 +1,182 @@
+from math import sqrt
+
+import torch
+import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+Tensor = torch.Tensor
+
+
+@triton.jit
+def _flash_monarch_attn_kernel(
+    q_ptr,
+    stride_q_e,
+    stride_q_h,
+    stride_q_m,
+    stride_q_b,
+    stride_q_d,
+    k_ptr,
+    stride_k_e,
+    stride_k_h,
+    stride_k_m,
+    stride_k_b,
+    stride_k_d,
+    v_ptr,
+    stride_v_e,
+    stride_v_h,
+    stride_v_m,
+    stride_v_b,
+    stride_v_d,
+    o_ptr,
+    stride_o_e,
+    stride_o_h,
+    stride_o_m,
+    stride_o_b,
+    stride_o_d,
+    H: int,
+    sm_scale: float,
+    BLOCK_M: tl.constexpr,
+    BLOCK_B: tl.constexpr,
+    BLOCK_D: tl.constexpr,
+):
+    idx_eh = tl.program_id(0)
+    idx_e = idx_eh // H
+    idx_h = idx_eh % H
+
+    q_block_ptr = (
+        q_ptr
+        + stride_q_e * idx_e
+        + stride_q_h * idx_h
+        + (
+            stride_q_m * tl.arange(0, BLOCK_M)[:, None, None]
+            + stride_q_b * tl.arange(0, BLOCK_B)[None, :, None]
+            + stride_q_d * tl.arange(0, BLOCK_D)[None, None, :]
+        )
+    )
+    q = tl.load(q_block_ptr)
+
+    k_block_ptr = (
+        k_ptr
+        + stride_k_e * idx_e
+        + stride_k_h * idx_h
+        + (
+            stride_k_m * tl.arange(0, BLOCK_M)[:, None, None]
+            + stride_k_b * tl.arange(0, BLOCK_B)[None, :, None]
+            + stride_k_d * tl.arange(0, BLOCK_D)[None, None, :]
+        )
+    )
+    k = tl.load(k_block_ptr)
+
+    v_block_ptr = (
+        v_ptr
+        + stride_v_e * idx_e
+        + stride_v_h * idx_h
+        + (
+            stride_v_m * tl.arange(0, BLOCK_M)[:, None, None]
+            + stride_v_b * tl.arange(0, BLOCK_B)[None, :, None]
+            + stride_v_d * tl.arange(0, BLOCK_D)[None, None, :]
+        )
+    )
+    v = tl.load(v_block_ptr)
+
+    r = sm_scale * tl.dot(q, tl.permute(k, (0, 2, 1)))
+    r = tl.exp(r - tl.max(r, axis=2, keep_dims=True))
+    r = r / tl.sum(r, axis=2, keep_dims=True)
+
+    c = tl.sum(r * tl.log(r), axis=2)
+    ct = tl.permute(c, (1, 0))
+
+    a = (sm_scale * tl.dot(r.to(k.dtype), k)).to(k.dtype)
+    y = tl.dot(r.to(v.dtype), v).to(v.dtype)
+
+    qt = tl.permute(q, (1, 0, 2))
+    at = tl.permute(a, (1, 0, 2))
+    yt = tl.permute(y, (1, 0, 2))
+
+    l = tl.dot(qt, tl.permute(at, (0, 2, 1)))
+    l = l - ct[:, None, :]
+    l = tl.exp(l - tl.max(l, axis=2, keep_dims=True))
+    l = l / tl.sum(l, axis=2, keep_dims=True)
+
+    o = tl.dot(l.to(yt.dtype), yt).to(yt.dtype)
+    o_block_ptr = (
+        o_ptr
+        + stride_o_e * idx_e
+        + stride_o_h * idx_h
+        + (
+            stride_o_b * tl.arange(0, BLOCK_B)[:, None, None]
+            + stride_o_m * tl.arange(0, BLOCK_M)[None, :, None]
+            + stride_o_d * tl.arange(0, BLOCK_D)[None, None, :]
+        )
+    )
+
+    tl.store(o_block_ptr, o)
+
+
+def fused_flash_monarch_attention(
+    q: Tensor, k: Tensor, v: Tensor, B: int, T: int
+) -> Tensor:
+    E, H, N, D = q.shape
+    M = triton.cdiv(N, B)
+    assert T == 1
+
+    grid = (E * H,)
+
+    BLOCK_B = B
+    BLOCK_M = M
+    BLOCK_D = D
+
+    # BLOCK_B = max(triton.next_power_of_2(B), 16)
+    # BLOCK_M = max(triton.next_power_of_2(M), 16)
+    # BLOCK_D = max(triton.next_power_of_2(D), 16)
+
+    o = torch.empty_like(q)
+
+    sm_scale = 1 / sqrt(D)
+
+    q_strides = (q.stride(0), q.stride(1), B * q.stride(2), q.stride(2), q.stride(3))
+    k_strides = (k.stride(0), k.stride(1), B * k.stride(2), k.stride(2), k.stride(3))
+    v_strides = (v.stride(0), v.stride(1), B * v.stride(2), v.stride(2), v.stride(3))
+    o_strides = (o.stride(0), o.stride(1), B * o.stride(2), o.stride(2), o.stride(3))
+
+    _flash_monarch_attn_kernel[grid](
+        q,
+        *q_strides,
+        k,
+        *k_strides,
+        v,
+        *v_strides,
+        o,
+        *o_strides,
+        H,
+        sm_scale,
+        BLOCK_M=BLOCK_M,
+        BLOCK_B=BLOCK_B,
+        BLOCK_D=BLOCK_D,
+        num_warps=16,  # type: ignore
+    )
+
+    return o
+
+
+def test():
+    from flash_monarch_attention_v2 import flash_monarch_attention_v2
+
+    # torch.cuda.manual_seed(0)
+    torch.manual_seed(0)
+
+    q = torch.randn(1, 1, 256, 64, dtype=torch.float16).cuda()
+    k = torch.randn(1, 1, 256, 64, dtype=torch.float16).cuda()
+    v = torch.randn(1, 1, 256, 64, dtype=torch.float16).cuda()
+
+    o1 = fused_flash_monarch_attention(q, k, v, 16, 1)
+    o2 = flash_monarch_attention_v2(q, k, v, None, 1, 16, True)
+
+    print(o1[0, 0, :32, :32])
+    print()
+    print(o2[0, 0, :32, :32])
+
+
+if __name__ == "__main__":
+    test()
