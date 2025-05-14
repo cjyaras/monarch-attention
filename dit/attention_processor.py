@@ -3,29 +3,30 @@ from typing import Dict, Optional
 import torch
 from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 
-from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax
-from common.soba import SobaMonarch
+from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax, LinearAttention
+from ma.monarch_attention import MonarchAttention
 from dit.config import AttentionType, EfficientAttnConfig
 
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
-    AttentionType.soba_monarch: SobaMonarch,
+    AttentionType.monarch: MonarchAttention,
     AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
     AttentionType.cosformer: Cosformer,
+    AttentionType.linear_attention: LinearAttention,
 }
 
 
 def prepare_args(config: EfficientAttnConfig, layer_num: Optional[int] = None):
-    if isinstance(config.efficient_attention_type, Dict):
+    if isinstance(config.attention_type, Dict):
         assert layer_num is not None
-        attn_type = config.efficient_attention_type[layer_num]
+        attn_type = config.attention_type[layer_num]
     else:
-        attn_type = config.efficient_attention_type
+        attn_type = config.attention_type
 
     match attn_type:
-        case AttentionType.soba_monarch:
+        case AttentionType.monarch:
             return (
                 config.block_size,
                 config.num_steps,
@@ -35,36 +36,34 @@ def prepare_args(config: EfficientAttnConfig, layer_num: Optional[int] = None):
         case AttentionType.softmax:
             return (config.enable_flash_attention,)
         case AttentionType.linformer:
-            return (config.rank, config.seq_len, config.share_kv, config.module_device)
+            return (config.rank,)
 
         case AttentionType.performer:
-            return (
-                config.rank,
-                config.estimator_type,
-                config.ortho_features,
-                config.module_device,
-            )
+            return (config.rank,)
 
         case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads, config.conv_kernel_size)
+            return (config.rank, config.num_attention_heads,)
 
         case AttentionType.cosformer:
+            return ()
+        
+        case AttentionType.linear_attention:
             return ()
 
         case _:
             raise ValueError(
-                f"Invalid attention type: {config.efficient_attention_type}"
+                f"Invalid attention type: {config.attention_type}"
             )
 
 
 class EfficientAttnProcessor(AttnProcessor2_0):
     def __init__(self, config: EfficientAttnConfig, layer_num: Optional[int] = None):
         super().__init__()
-        if isinstance(config.efficient_attention_type, Dict):
-            attention_type = config.efficient_attention_type[layer_num]
+        if isinstance(config.attention_type, Dict):
+            attention_type = config.attention_type[layer_num]
             module = ATTENTION_TYPE_TO_MODULE[attention_type]
         else:
-            module = ATTENTION_TYPE_TO_MODULE[config.efficient_attention_type]
+            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
 
         self.attn_module = module(*prepare_args(config, layer_num))
 
