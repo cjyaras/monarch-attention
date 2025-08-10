@@ -144,7 +144,10 @@ class ModelArguments:
         default=None,
         metadata={"help": "Size of the blocks of the monarch attention."},
     )
-
+    attention_rank: Optional[int] = field(
+        default=None,
+        metadata={"help": "Attention rank for low-rank attentions such as linformer, performer and nystromformer."},
+    )
 
 @dataclass
 class DataTrainingArguments:
@@ -441,8 +444,9 @@ def main():
     # Distributed training:
     # The .from_pretrained methods guarantee that only one local process can concurrently
     # download model & vocab.
-    if training_args.do_train and model_args.attention_type != "softmax":
-        raise ValueError(f"Training is supported with `attention_type=softmax` only, got: {model_args.attention_type}")  
+
+    # if training_args.do_train and model_args.attention_type != "softmax":
+    #     raise ValueError(f"Training is supported with `attention_type=softmax` only, got: {model_args.attention_type}")  
 
     config = CustomBartConfig.from_pretrained(
         model_args.config_name if model_args.config_name else model_args.model_name_or_path,
@@ -453,6 +457,7 @@ def main():
         attention_type=model_args.attention_type,
         num_steps=model_args.num_steps,
         block_size=model_args.block_size,
+        rank=model_args.attention_rank,
     )
     tokenizer = AutoTokenizer.from_pretrained(
         model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
@@ -471,7 +476,6 @@ def main():
         token=model_args.token,
         trust_remote_code=model_args.trust_remote_code,
     )
-
 
     # We resize the embeddings only when necessary to avoid index errors. If you are creating a model from scratch
     # on a small vocab and want a smaller embedding size, remove this test.

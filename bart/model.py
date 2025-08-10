@@ -11,6 +11,7 @@ from transformers.models.bart.modeling_bart import (
     BartAttention,
     BartLearnedPositionalEmbedding,
 )
+from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
 from common.baselines import (
@@ -112,8 +113,8 @@ class CustomBartAttention(BartAttention):
         assert output_attentions is False
 
 
-        if self.config.attention_type != AttentionType.softmax:
-            assert not self.training
+        # if self.config.attention_type != AttentionType.softmax:
+        #     assert not self.training
 
 
         # [CL, 05/05/2025]
@@ -129,13 +130,17 @@ class CustomBartAttention(BartAttention):
         query_states = self.q_proj(hidden_states) 
 
         # self_attention
-        key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
-        value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
+        # key_states = self._shape(self.k_proj(hidden_states), -1, bsz)
+        # value_states = self._shape(self.v_proj(hidden_states), -1, bsz)
 
-        proj_shape = (bsz, self.num_heads, -1, self.head_dim)
-        query_states = self._shape(query_states, tgt_len, bsz).view(*proj_shape)
-        key_states = key_states.reshape(*proj_shape)
-        value_states = value_states.reshape(*proj_shape)
+        # proj_shape = (bsz, self.num_heads, -1, self.head_dim)
+        proj_shape = (bsz, tgt_len, -1, self.head_dim)
+        # query_states = self._shape(query_states, tgt_len, bsz).view(*proj_shape)
+        query_states = query_states.reshape(*proj_shape).transpose(1,2)
+        key_states = key_states.reshape(*proj_shape).transpose(1,2)
+        value_states = value_states.reshape(*proj_shape).transpose(1,2)
 
         if attention_mask is not None and len(attention_mask.shape)==4:
             attention_mask = attention_mask[:,0,0,:]
@@ -143,7 +148,7 @@ class CustomBartAttention(BartAttention):
 
 
         attn_output = self.attn_module(
-            query_states, key_states, value_states, attention_mask
+            query_states, key_states, value_states, attention_mask,
         )
         if attn_output.size() != (bsz, self.num_heads, tgt_len, self.head_dim):
             raise ValueError(
@@ -181,7 +186,7 @@ class CustomBartEncoderLayer(BartEncoderLayer):
 
     def forward(self, hidden_states, *args, **kwargs):
         res = super().forward(hidden_states, *args, **kwargs)
-        return res
+        return res 
 
 
 
@@ -193,6 +198,42 @@ class CustomBartDecoder(BartDecoder):
             config.d_model,
         )
         self.post_init()
+
+    def forward(
+        self,
+        input_ids: Optional[torch.LongTensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        encoder_hidden_states: Optional[torch.FloatTensor] = None,
+        encoder_attention_mask: Optional[torch.LongTensor] = None,
+        head_mask: Optional[torch.Tensor] = None,
+        cross_attn_head_mask: Optional[torch.Tensor] = None,
+        past_key_values: Optional[list[torch.FloatTensor]] = None,
+        inputs_embeds: Optional[torch.FloatTensor] = None,
+        use_cache: Optional[bool] = None,
+        output_attentions: Optional[bool] = None,
+        output_hidden_states: Optional[bool] = None,
+        return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+    ) -> Union[tuple, BaseModelOutputWithPastAndCrossAttentions]:
+
+        if encoder_hidden_states.ndim==2:
+            encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
+
+        return super().forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=encoder_attention_mask,
+            head_mask=head_mask,
+            cross_attn_head_mask=cross_attn_head_mask,
+            past_key_values=past_key_values,
+            inputs_embeds=inputs_embeds,
+            use_cache=use_cache,
+            output_attentions=output_attentions,
+            output_hidden_states=output_hidden_states,
+            return_dict=return_dict,
+            cache_position=cache_position,
+        )
 
 
 class CustomBartModel(BartModel):
@@ -258,10 +299,13 @@ class CustomBartForConditionalGeneration(BartForConditionalGeneration):
 
 
 
-def get_model(config: CustomBartConfig) -> CustomBartForConditionalGeneration:
+def get_model(
+    config: CustomBartConfig,
+    model_checkpoint_path:str = "./bart/finetuned/output/",
+) -> CustomBartForConditionalGeneration:
     device = get_device()
     model = CustomBartForConditionalGeneration.from_pretrained(
-        "./bart/finetuned/output/", config=config
+        model_checkpoint_path, config=config
     )
     model = model.to(device)  # type: ignore
     model.eval()

@@ -17,14 +17,13 @@ from transformers import AutoConfig, AutoModelForSeq2SeqLM
 
 
 AutoConfig.register("custom_bart", CustomBartConfig)
-AutoModelForSeq2SeqLM.register(CustomBartConfig, CustomBartForConditionalGeneration)
-
+AutoModelForSeq2SeqLM.register(
+    CustomBartConfig,
+    CustomBartForConditionalGeneration,
+)
 
 class CustomSummarizationPipeline(SummarizationPipeline):
     return_name = "summary"
-
-       
-
 
 PIPELINE_REGISTRY.register_pipeline(
     "custom-summarization",
@@ -37,14 +36,18 @@ def get_pipeline(
     config: CustomBartConfig,
     batch_size: int = 1,
     max_length: int = 8192,
+    model_checkpoint_path: str = "./bart/finetuned/output/",
 ) -> CustomSummarizationPipeline:
     pipe = pipeline(
         "custom-summarization",
-        model=get_model(config),
+        model=get_model(
+            config,
+            model_checkpoint_path=model_checkpoint_path,
+        ),
         device=get_device(),
         tokenizer=get_processor(max_length),
         batch_size=batch_size,
-        torch_dtype="float16",
+        torch_dtype="bfloat16",
         pipeline_class=CustomSummarizationPipeline,
     )
     assert isinstance(pipe, CustomSummarizationPipeline)

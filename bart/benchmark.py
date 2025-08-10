@@ -1,11 +1,30 @@
-import torch
+import argparse
+import json
+import os
 
 from bart.config import AttentionType, get_config
 from bart.evaluation import Evaluator
+import torch
 
-NUM_SAMPLES = None 
+
+parser = argparse.ArgumentParser(description='A benchmark for various attention types.')
+
+parser.add_argument(
+    "--model_checkpoint_path", 
+    default="./bart/finetuned/output/",
+    help="The path to the Bart checkpoint.",
+)
+parser.add_argument(
+    "--save_dir",
+    default="./bart/results_softmax",
+    help="The path to the output json files."
+)
+
+NUM_SAMPLES = None
 BATCH_SIZE = 4
-SAVE_DIR = "bart/results"
+
+args = parser.parse_args()
+print(args)
 
 def print_results(res):
     max_key_characters = 0
@@ -18,19 +37,18 @@ def print_results(res):
 
 @torch.no_grad()
 def main():
+    file_names = {}
+
     for max_length, nystrom_rank, block_size, num_steps in [(1024, 64, 32, 3), (2048, 80, 32, 2), (4096, 112, 64, 2), (8192, 160, 64, 2)]:
         print(f"Max Length: {max_length}, nystrom_rank: {nystrom_rank}, block_size: {block_size}, num_steps: {num_steps}")
         evaluator = Evaluator(
             num_samples=NUM_SAMPLES,
             batch_size=BATCH_SIZE,
-            save_dir=SAVE_DIR,
+            save_dir=args.save_dir,
             max_length=max_length,
+            model_checkpoint_path=args.model_checkpoint_path,
         )
 
-        # efficient_attn_layers = [0, 1, 2, 3, 8, 9, 10, 11]
-        # efficient_attn_layers = [1, 3, 5, 7, 9, 11]
-        # efficient_attn_layers = [8, 9, 10, 11]
-        # efficient_attn_layers = [6, 7, 8, 9, 10, 11]
         efficient_attn_layers = range(12)
 
         def get_mixed_type(efficient_type, default_type):
@@ -46,9 +64,10 @@ def main():
         config.attention_type = AttentionType.softmax
         config.enable_flash_attention = False
         print(config.attention_type)
-        res = evaluator.evaluate(config)
+        # res = evaluator.evaluate(config)
+        file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
-        # evaluator.evaluate_and_save(config)
+        file_names[f"softmax_{max_length}"] = file_name
 
 
 
@@ -60,9 +79,10 @@ def main():
         config.rank = nystrom_rank
         config.conv_kernel_size = None
         print(config.attention_type)
-        res = evaluator.evaluate(config)
+        # res = evaluator.evaluate(config)
+        file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
-        #evaluator.evaluate_and_save(config)
+        file_names[f"nystrom_{max_length}_rank{nystrom_rank}"] = file_name
 
 
         # Monarch
@@ -73,10 +93,13 @@ def main():
         config.num_steps = num_steps
         config.block_size = block_size
         print(config.attention_type)
-        res = evaluator.evaluate(config)
+        # res = evaluator.evaluate(config)
+        file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
-        # evaluator.evaluate_and_save(config)
+        file_names[f"monarch_{max_length}_b{block_size}_t{num_steps}"] = file_name
 
+    with open(os.path.join(args.save_dir, "filenames.json"), "w") as f:
+        json.dump(file_names, f)
 
 
 if __name__ == "__main__":

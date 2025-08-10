@@ -15,6 +15,7 @@ def al_cl_ref(ar, k, cr, sm_scale, mask, eps=1e-12):
         r_hat - torch.clamp(torch.max(r_hat, dim=-1, keepdim=True).values, min=eps)
     )
     r = r_hat / (torch.sum(r_hat, dim=-1, keepdim=True) + eps)
+    r = torch.clamp(r, min=torch.finfo(r.dtype).tiny)
 
     cl = torch.sum(xlogy(r, r), dim=-1).transpose(-1, -2)
     al = sm_scale * (r.to(k.dtype) @ k).transpose(-2, -3)
@@ -42,6 +43,7 @@ def al_y_cl_ref(ar, k, v, cr, sm_scale, mask, eps=1e-12):
         r_hat - torch.clamp(torch.max(r_hat, dim=-1, keepdim=True).values, min=eps)
     )
     r = r_hat / (torch.sum(r_hat, dim=-1, keepdim=True) + eps)
+    r = torch.clamp(r, min=torch.finfo(r.dtype).tiny)
 
     cl = torch.sum(xlogy(r, r), dim=-1).transpose(-1, -2)
     al = sm_scale * (r.to(k.dtype) @ k).transpose(-2, -3)
