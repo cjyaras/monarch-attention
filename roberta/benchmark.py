@@ -8,6 +8,54 @@ BATCH_SIZE = 8
 SAVE_DIR = "roberta/results"
 
 
+def get_mixed_type(efficient_attn_layers, efficient_type, default_type):
+    return {
+        layer_num: (
+            efficient_type if layer_num in efficient_attn_layers else default_type
+        )
+        for layer_num in range(12)
+    }
+
+
+@torch.no_grad()
+def ablation():
+    evaluator = Evaluator(
+        num_samples=NUM_SAMPLES,
+        batch_size=BATCH_SIZE,
+        save_dir="",
+    )
+
+    for i in range(12):
+        efficient_attn_layers = {i}
+
+        config = get_config()
+        config.attention_type = get_mixed_type(
+            efficient_attn_layers,
+            AttentionType.monarch_attention,
+            AttentionType.softmax,
+        )
+        config.block_size = 24
+        config.pad_type = PadType.post
+        config.num_steps = 1
+        print(efficient_attn_layers)
+        print(evaluator.evaluate(config))
+
+    # for i in [0, 4, 8]:
+    #     efficient_attn_layers = set(range(12)).difference(set(range(i, i + 4)))
+
+    #     config = get_config()
+    #     config.attention_type = get_mixed_type(
+    #         efficient_attn_layers,
+    #         AttentionType.monarch_attention,
+    #         AttentionType.softmax,
+    #     )
+    #     config.block_size = 24
+    #     config.pad_type = PadType.post
+    #     config.num_steps = 1
+    #     print(efficient_attn_layers)
+    #     print(evaluator.evaluate(config))
+
+
 @torch.no_grad()
 def main():
     evaluator = Evaluator(
@@ -17,14 +65,6 @@ def main():
     )
 
     efficient_attn_layers = [0, 1, 2, 3, 8, 9, 10, 11]
-
-    def get_mixed_type(efficient_type, default_type):
-        return {
-            layer_num: (
-                efficient_type if layer_num in efficient_attn_layers else default_type
-            )
-            for layer_num in range(12)
-        }
 
     # Softmax
     config = get_config()
@@ -38,7 +78,9 @@ def main():
         for block_size in [24, 48, 96, 128]:
             config = get_config()
             config.attention_type = get_mixed_type(
-                AttentionType.monarch_attention, AttentionType.softmax
+                efficient_attn_layers,
+                AttentionType.monarch_attention,
+                AttentionType.softmax,
             )
             config.block_size = block_size
             config.pad_type = PadType.post
@@ -60,7 +102,7 @@ def main():
     for rank in range(32, 192 + 1, 32):
         config = get_config()
         config.attention_type = get_mixed_type(
-            AttentionType.performer, AttentionType.softmax
+            efficient_attn_layers, AttentionType.performer, AttentionType.softmax
         )
         config.rank = rank
         print(config.attention_type[0], rank)
@@ -70,7 +112,7 @@ def main():
     for rank in range(16, 64 + 1, 16):
         config = get_config()
         config.attention_type = get_mixed_type(
-            AttentionType.nystromformer, AttentionType.softmax
+            efficient_attn_layers, AttentionType.nystromformer, AttentionType.softmax
         )
         config.rank = rank
         print(config.attention_type[0], rank)
@@ -79,7 +121,7 @@ def main():
     # Cosformer
     config = get_config()
     config.attention_type = get_mixed_type(
-        AttentionType.cosformer, AttentionType.softmax
+        efficient_attn_layers, AttentionType.cosformer, AttentionType.softmax
     )
     print(config.attention_type[0])
     evaluator.evaluate_and_save(config)
@@ -87,11 +129,12 @@ def main():
     # LinearAttention
     config = get_config()
     config.attention_type = get_mixed_type(
-        AttentionType.linear_attention, AttentionType.softmax
+        efficient_attn_layers, AttentionType.linear_attention, AttentionType.softmax
     )
     print(config.attention_type[0])
     evaluator.evaluate_and_save(config)
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    ablation()

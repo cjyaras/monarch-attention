@@ -10,6 +10,29 @@ SAVE_DIR = "vit/results"
 
 
 @torch.no_grad()
+def ablation():
+    evaluator = Evaluator(
+        num_samples=NUM_SAMPLES, top_k=TOP_K, batch_size=BATCH_SIZE, save_dir=""
+    )
+
+    # Original
+    num_steps = 2
+    block_size = 14
+    config = get_config()
+    config.attention_type = AttentionType.monarch_attention
+    config.pad_type = PadType.pre
+    config.block_size = block_size
+    config.num_steps = num_steps
+    print(config.attention_type, num_steps, block_size, config.pad_type)
+    print(evaluator.evaluate(config))
+
+    # Post-pad
+    config.pad_type = PadType.post
+    print(config.attention_type, num_steps, block_size, config.pad_type)
+    print(evaluator.evaluate(config))
+
+
+@torch.no_grad()
 def main():
     evaluator = Evaluator(
         num_samples=NUM_SAMPLES,
@@ -74,4 +97,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+    ablation()

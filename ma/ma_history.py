@@ -41,6 +41,4 @@ def monarch_attention_history(q: Tensor, k: Tensor, T: int, B: int) -> list[Tens
         cL = torch.einsum("kji->jk", R * torch.log(R))
         L = F.softmax(bL - cL[:, :, None], dim=1)
 
-        history.append(monarch_matrix(L, R))
-
     return history
