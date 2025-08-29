@@ -41,7 +41,7 @@ def extract_query_key(
     pipe = get_pipeline(attn_type)
 
     all_layer_intermediates = [
-        {"query": [], "key": []} for _ in range(pipe.transformer.num_layers)
+        {"query": [], "key": []} for _ in range(pipe.transformer.config.num_layers)
     ]
     _register_qk_hook(pipe.transformer, all_layer_intermediates)
 

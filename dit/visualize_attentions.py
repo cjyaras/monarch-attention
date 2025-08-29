@@ -1,15 +1,24 @@
+from typing import List, Dict
 import os
 
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
-from common.baselines import Softmax
-from common.soba import InitType, PadType, SobaMonarch
-from dit.config import get_config
+from common.baselines import Softmax, Nystromformer
+from ma.monarch_attention import MonarchAttention, PadType
 from dit.extract import extract_query_key
 from dit.config import AttentionType
 
+
+def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:
+    assert max(layers_to_replace) <= num_layers
+
+    attn_dict = {}
+    for i in range(1, num_layers + 1):
+        attn_dict[i] = attn_type if i in layers_to_replace else AttentionType.softmax
+
+    return attn_dict
 
 @torch.no_grad()
 def main():
@@ -24,38 +33,60 @@ def main():
         torch.save(query, "dit/query.pt")
         torch.save(key, "dit/key.pt")
 
-    layers = np.arange(0, 28)
-    heads = np.arange(5, 6)
+    if not os.path.exists("dit/query_first_half_nystrom.pt"):
+        attn_type = generate_attn_dict(AttentionType.nystromformer, list(range(1, 15)))
+        query, key = extract_query_key(
+            attn_type,
+            words=["triceratops"],
+            seed=0,
+            num_inference_steps=1
+        )
+        torch.save(query, "dit/query_first_half_nystrom.pt")
+        torch.save(key, "dit/key_first_half_nystrom.pt")
+
+    layers = np.arange(14, 28)
+    heads = np.arange(0, 16)
 
     # Look across heads in certain layer
     for layer in layers:
         query = torch.load("dit/query.pt")
         key = torch.load("dit/key.pt")
 
+        query_nystrom = torch.load("dit/query_first_half_nystrom.pt")
+        key_nystrom = torch.load("dit/key_first_half_nystrom.pt")
+
         query = query[[0], layer]
         key = key[[0], layer]
 
+        query_nystrom = query_nystrom[[0], layer]
+        key_nystrom = key_nystrom[[0], layer]
+
         softmax = Softmax()
-        soba_monarch_ones = SobaMonarch(16, 3, PadType.pre, InitType.ones)
-        soba_monarch_eye = SobaMonarch(16, 3, PadType.pre, InitType.eye)
+        #monarch = MonarchAttention(16, 3, PadType.pre)
+        nystrom = Nystromformer(32, 16)
 
         for head in heads:
-            softmax_matrix = softmax.get_matrix(query, key)[0, head]
-            soba_monarch_ones_matrix = soba_monarch_ones.get_matrix(query, key)[0, head]
-            soba_monarch_eye_matrix = soba_monarch_eye.get_matrix(query, key)[0, head]
+            softmax_nystrom_matrix = softmax.get_matrix(query_nystrom, key_nystrom)[0, head].detach().cpu().numpy()
+            #monarch_matrix = monarch.get_matrix(query, key)[0, head].detach().cpu().numpy()
+            nystrom_matrix = nystrom.get_matrix(query_nystrom, key_nystrom)[0, head].detach().cpu().numpy()
+            softmax_matrix = softmax.get_matrix(query, key)[0, head].detach().cpu().numpy()
 
             fig, ax = plt.subplots(1, 3)
             ax[0].imshow(softmax_matrix)
-            ax[0].set_title('Softmax')
+            ax[0].set_title('Softmax (original)')
 
-            ax[1].imshow(soba_monarch_ones_matrix)
-            ax[1].set_title('SOBA (ones init)')
+            ax[1].imshow(softmax_nystrom_matrix)
+            ax[1].set_title('Softmax (first half nystrom)')
 
-            ax[2].imshow(soba_monarch_eye_matrix)
-            ax[2].set_title('SOBA (Identity init)')
+            #ax[1].imshow(monarch_matrix)
+            #ax[1].set_title('Monarch')
+
+            ax[2].imshow(nystrom_matrix)
+            ax[2].set_title('Nystromformer')
 
             fig.suptitle('Layer ' + str(layer) + ' head ' + str(head) + ' attention matrices')
-            plt.show()
+            plt.savefig('./dit/nystrom_attns/layer_' + str(layer) + '_head_' + str(head) + '_attentions.png')
+            plt.close()
 
 
 if __name__ == "__main__":

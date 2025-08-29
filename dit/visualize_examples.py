@@ -1,4 +1,5 @@
 from typing import List, Dict
+import argparse
 import torch
 import os
 
@@ -9,7 +10,9 @@ from dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
 from torchvision.utils import save_image
+from common.utils import get_device
 
+device = get_device()
 
 
 def save_output_images(output: ImagePipelineOutput, save_path: str, num_images_per_row: int):
@@ -21,77 +24,95 @@ def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_la
     assert max(layers_to_replace) <= num_layers
 
     attn_dict = {}
-    for i in range(1, num_layers + 1):
-        attn_dict[i] = attn_type if i in layers_to_replace else AttentionType.softmax
+    for i in range(num_layers):
+        attn_dict[i + 1] = attn_type if i in layers_to_replace else AttentionType.softmax
 
     return attn_dict
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('--attention_type', type=str, default='softmax', choices=['softmax', 'monarch', 'linformer', 'performer', 'nystromformer', 'cosformer'])
+    parser.add_argument('--replace_all_layers', action='store_true')
+    parser.add_argument('--num_classes', type=int, default=1000)
+    parser.add_argument('--num_samples', type=int, default=36)
+    parser.add_argument('--num_inference_steps', type=int, default=32)
+    parser.add_argument('--cfg_scale', type=float, default=1.5)
+    parser.add_argument('--seed', type=int, default=0)
+    
+    parser.add_argument('--save_dir', type=str, default='./dit/generations')
+
+    parser.add_argument('--monarch_num_steps', type=int, default=3, help='Number of steps for monarch attention')
+    parser.add_argument('--monarch_block_size', type=int, default=16, help='Block size for monarch attention')
+    parser.add_argument('--rank', type=int, default=32, help='Rank for low-rank attentions')
+
+    args = parser.parse_args()
+
+    return args
+
 # Performer model is only generating all black images
-# so I have it commented out for now
 @torch.no_grad()
 def main():
-    # Set random seed for reproducibility
-    seed = 2025
+    # Parse args
+    args = parse_args()
+    attention_type = args.attention_type
+    replace_all_layers = args.replace_all_layers
+    num_classes = args.num_classes
+    num_samples = args.num_samples
+    num_inference_steps = args.num_inference_steps
+    cfg_scale = args.cfg_scale
+    seed = args.seed
+    num_steps = args.monarch_num_steps
+    block_size = args.monarch_block_size
+    rank = args.rank
+
+    # Set random seed
     torch.manual_seed(seed)
     np.random.seed(seed)
 
-    # Make pipelines
-    sm_pipe = get_pipeline(attn_type=AttentionType.softmax)
-    soba_pipe = get_pipeline(attn_type=AttentionType.soba_monarch)
-    lin_pipe = get_pipeline(attn_type=AttentionType.linformer, rank=64)
-    #perf_pipe = get_pipeline(attn_type=AttentionType.performer)
-    nys_pipe = get_pipeline(attn_type=AttentionType.nystromformer, rank=64)
-    cos_pipe = get_pipeline(attn_type=AttentionType.cosformer)
+    # Prepare sampling
+    if attention_type == "softmax":
+        pipe = get_pipeline(attn_type=AttentionType.softmax)
+    else:
+        if replace_all_layers:
+            pipe = get_pipeline(attn_type=getattr(AttentionType, attention_type), num_steps=num_steps, block_size=block_size, rank=rank)
+        else:
+            layers_to_replace = list(range(14, 28)) # Replace first half of layers
+            attn_dict = generate_attn_dict(getattr(AttentionType, attention_type), layers_to_replace=layers_to_replace)
+            print(attn_dict)
+            pipe = get_pipeline(attn_dict, num_steps=num_steps, block_size=block_size, rank=rank)
+
+    
 
     # Classes to generate
-    all_classes = list( sm_pipe.labels.keys() )
-    num_samples_to_generate = 36
-    num_images_per_row = int(np.sqrt(num_samples_to_generate))
-    classes = np.random.choice(all_classes, size=num_samples_to_generate)
+    class_ids = np.random.choice(np.arange(num_classes), size=num_samples)
 
     # Generate same random sample for all models
-    num_inference_steps = 32
-    batch_size = len(classes)
-    latent_channels = sm_pipe.transformer.config.in_channels
-    latent_size = sm_pipe.transformer.config.sample_size
+    latent_channels = pipe.transformer.config.in_channels
+    latent_size = pipe.transformer.config.sample_size
 
-    latents = torch.randn(batch_size, latent_channels, latent_size, latent_size)
+    latents = torch.randn(num_samples, latent_channels, latent_size, latent_size)
+
 
     # Generate images
-    class_ids = sm_pipe.get_label_ids(classes)
-
     output_type = "numpy"
-
-    sm_output = sm_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
-    soba_output = soba_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
-    lin_output = lin_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
-    #perf_output = perf_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
-    nys_output = nys_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
-    cos_output = cos_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type)
+    output = pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type=output_type, guidance_scale=cfg_scale)
 
     # Save images
-    save_path = "./dit/generations"
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+    parent_save_dir = args.save_dir
+    if not os.path.exists(parent_save_dir):
+        os.makedirs(parent_save_dir)
+    
+    if attention_type == "softmax":
+        save_fname = attention_type + ".png"
+    elif attention_type != "softmax" and replace_all_layers:
+        save_fname = attention_type + "_all_layers.png"
+    elif attention_type != "softmax" and not replace_all_layers:
+        save_fname = attention_type + "_second_half_layers.png"
 
-    sm_save_path = os.path.join(save_path, "softmax.png")
-    save_output_images(sm_output, sm_save_path, num_images_per_row=num_images_per_row)
-
-    soba_save_path = os.path.join(save_path, "soba.png")
-    save_output_images(soba_output, soba_save_path, num_images_per_row=num_images_per_row)
-
-    lin_save_path = os.path.join(save_path, "linformer.png")
-    save_output_images(lin_output, lin_save_path, num_images_per_row=num_images_per_row)
-
-    # save_path_perf = os.path.join(save_path, "performer.png")
-    # save_output_images(perf_output, save_path_perf, num_images_per_row=num_images_per_row)
-
-    nys_save_path = os.path.join(save_path, "nystromformer.png")
-    save_output_images(nys_output, nys_save_path, num_images_per_row=num_images_per_row)
-
-    cos_save_path = os.path.join(save_path, "cosformer.png")
-    save_output_images(cos_output, cos_save_path, num_images_per_row=num_images_per_row)
-
+    save_path = os.path.join(parent_save_dir, save_fname)
+    num_images_per_row = int(np.sqrt(num_samples))
+    save_output_images(output, save_path, num_images_per_row=num_images_per_row)
 
 
 if __name__ == "__main__":

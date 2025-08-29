@@ -1,65 +1,45 @@
 from enum import StrEnum
 from typing import Dict, Optional, Union
 
-from common.soba import PadType
+from ma.monarch_attention import PadType
 
 
 class AttentionType(StrEnum):
     softmax = "softmax"
-    soba_monarch = "soba-monarch"
+    monarch = "monarch"
     linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
     cosformer = "cosformer"
+    linear_attention = "linear-attention"
 
 
 class EfficientAttnConfig:
     def __init__(
         self,
-        efficient_attention_type: Union[AttentionType, Dict[int, AttentionType]],
+        attention_type: Union[AttentionType, Dict[int, AttentionType]],
         enable_flash_attention: bool = False,
-        rank: int = 8,
+        rank: int | None = 32,
         block_size: Optional[int] = 16,
         num_steps: Optional[int] = 3,
         pad_type: PadType = PadType.pre,
-        share_kv: bool = False,
-        seq_len: int = 16**2,
-        estimator_type: str = "pos",
-        ortho_features: bool = True,
-        num_attention_heads: int = 16,
-        conv_kernel_size: Optional[int] = None,
-        module_device=None,
+        num_attention_heads: int = 16
     ):
 
-        self.efficient_attention_type = efficient_attention_type
-        self.module_device = module_device
+        self.attention_type = attention_type
 
         # Softmax
         self.enable_flash_attention = enable_flash_attention
 
-        # SobaMonarch
+        # Monarch
         self.num_steps = num_steps
         self.block_size = block_size
         self.pad_type = pad_type
 
-        # Linformer
-        # self.rank used as projection dim
+        # Low-rank attention
         self.rank = rank
-        self.share_kv = share_kv
-        self.seq_len = seq_len
-
-        # Performer
-        # self.rank used as num_samples
-        self.estimator_type = estimator_type
-        self.ortho_features = ortho_features
-
-        # Nystromformer
-        # self.rank used as number of landmarks
         self.num_attention_heads = num_attention_heads
-        self.conv_kernel_size = conv_kernel_size
-
-        # Cosformer: none
 
 
-def get_config(efficient_attention_type: AttentionType, **kwargs):
-    return EfficientAttnConfig(efficient_attention_type, **kwargs)
+def get_config(attention_type: AttentionType, **kwargs):
+    return EfficientAttnConfig(attention_type, **kwargs)

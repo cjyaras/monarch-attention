@@ -1,4 +1,4 @@
-# MonarchAttention: Zero-Shot Conversion to Structured Attention in Transformer-Based Encoders
+# MonarchAttention: Zero-Shot Conversion to Fast, Hardware-Aware Structured Attention
 <p align="center">
   <img width="60%" src="flash_monarch.jpg">
 </p>

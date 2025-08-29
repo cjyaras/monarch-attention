@@ -12,6 +12,8 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import is_torch_xla_available
 from diffusers.utils.torch_utils import randn_tensor
 
+from common.utils import get_device
+
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm
 
@@ -142,14 +144,14 @@ class CustomDiTPipeline(DiTPipeline):
         return ImagePipelineOutput(images=samples)
 
         
-def get_pipeline(attn_type: AttentionType,
+def get_pipeline(attn_type: Union[AttentionType, Dict[int, AttentionType]],
                  model_path: str = "facebook/DiT-XL-2-256",
-                 model_subfolder: str = "transformer", 
-                 device = 'cpu',
+                 model_subfolder: str = "transformer",
                  **kwargs):
 
-    config = get_config(efficient_attention_type=attn_type, **kwargs)
-    model = get_model(config, model_path, model_subfolder, device)
+    device = get_device()
+    config = get_config(attention_type=attn_type, **kwargs)
+    model = get_model(config, model_path, model_subfolder)
 
     pipe = CustomDiTPipeline.from_pretrained(model_path)
     pipe.transformer = model

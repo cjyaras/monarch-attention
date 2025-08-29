@@ -6,6 +6,7 @@ import torch.nn as nn
 from diffusers.models.transformers.dit_transformer_2d import DiTTransformer2DModel
 from dit.attention import CustomBasicTransformerBlock
 from dit.config import EfficientAttnConfig, AttentionType
+from common.utils import get_device
 
 class CustomDiTTransformer2DModel(DiTTransformer2DModel):
     """
@@ -85,9 +86,9 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
 
 def get_model(config: EfficientAttnConfig,
               model_path: str = "facebook/DiT-XL-2-256",
-              model_subfolder: str = "transformer",
-              device = 'cpu'):
+              model_subfolder: str = "transformer"):
     
+    device = get_device()
     model = CustomDiTTransformer2DModel.from_pretrained(model_path, subfolder=model_subfolder, efficient_attention_config=config)
     model = model.to(device)  # type: ignore
     model.eval()
