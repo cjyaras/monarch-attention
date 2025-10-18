@@ -1,5 +1,6 @@
 from math import sqrt
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
@@ -18,7 +19,10 @@ def main():
     query = torch.load("vit/query.pt")
     key = torch.load("vit/key.pt")
 
-    layer, head = 0, 10
+    np.save("vit/query.npy", query.cpu().numpy())
+    np.save("vit/key.npy", key.cpu().numpy())
+
+    layer, head = 0, 5
 
     q = query[0, layer, head, 1:]
     k = key[0, layer, head, 1:]

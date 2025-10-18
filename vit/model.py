@@ -70,6 +70,14 @@ class CustomViTSelfAttention(ViTSelfAttention):
             module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
             self.attn_module = module(*prepare_args(config.attention_type, config))
 
+    def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+        new_x_shape = x.size()[:-1] + (
+            self.num_attention_heads,
+            self.attention_head_size,
+        )
+        x = x.view(new_x_shape)
+        return x.permute(0, 2, 1, 3)
+
     def forward(
         self,
         hidden_states: torch.FloatTensor,
