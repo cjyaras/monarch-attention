@@ -1,5 +1,9 @@
+# Custom
+raw
+
 # Pytorch save files
 *.pt
+*.pth
 
 # json
 *.json

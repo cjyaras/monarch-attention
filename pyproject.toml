@@ -14,6 +14,7 @@ dependencies = [
     "opt_einsum",
     "einops",
     "torchvision",
+    "torch_geometric",
     "torchtnt",
     "transformers",
     "diffusers",

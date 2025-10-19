@@ -1,4 +1,7 @@
+from dataclasses import dataclass
 from enum import StrEnum
+
+from ma.monarch_attention import PadType
 
 
 class AttentionType(StrEnum):
@@ -11,29 +14,20 @@ class AttentionType(StrEnum):
     linear_attention = "linear-attention"
 
 
+@dataclass
 class CustomGPSConfig:
-    def __init__(
-        self,
-        input_dims: int,
-        hidden_dims: int,
-        num_layers: int,
-        num_heads: int,
-        attention_type: AttentionType = AttentionType.softmax,
-        enable_flash_attention: bool = False,
-        num_steps: int | None = None,
-        rank: int | None = None,
-        block_size: int | None = None,
-        pad_type: str | None = None,
-    ):
-        self.attention_type = attention_type
+    input_dims: int = 932
+    output_dims: int = 5
+    hidden_dims: int = 96
+    num_layers: int = 1
+    num_heads: int = 2
+    attention_type: AttentionType = AttentionType.softmax
+    enable_flash_attention: bool = False
+    num_steps: int | None = None
+    rank: int | None = None
+    block_size: int | None = None
+    pad_type: PadType = PadType.post
 
-        # Softmax
-        self.enable_flash_attention = enable_flash_attention
 
-        # Monarch
-        self.num_steps = num_steps
-        self.block_size = block_size
-        self.pad_type = pad_type
-
-        # Low-rank attention
-        self.rank = rank
+def get_config() -> CustomGPSConfig:
+    return CustomGPSConfig()

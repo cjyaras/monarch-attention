@@ -1,7 +1,7 @@
 import json
 import os
 import uuid
-from typing import Dict
+from typing import Any, Dict
 
 from transformers.configuration_utils import PretrainedConfig
 
@@ -17,7 +17,7 @@ class Logger:
         if save_folder != "" and not os.path.exists(self.save_folder):
             os.makedirs(self.save_folder)
 
-    def save(self, config: PretrainedConfig, result: Dict[str, float]) -> str:
+    def save(self, config: PretrainedConfig | Any, result: Dict[str, float]) -> str:
         file_name = generate_random_file_name()
         save_path = os.path.join(self.save_folder, file_name)
         attention_type = config.attention_type
