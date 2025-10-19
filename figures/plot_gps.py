@@ -37,15 +37,6 @@ def get_color_from_string(s: str) -> tuple[float, float, float]:
     return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))  # type: ignore
 
 
-# assign color for each method
-# colors = {
-#     "monarch-attention": hex_color_to_tuple("#332288"),
-#     "performer": hex_color_to_tuple("#44AA99"),
-#     "cosformer": hex_color_to_tuple("#88CCEE"),
-#     "linear-attention": hex_color_to_tuple("#DDCC77"),
-#     "nystromformer": hex_color_to_tuple("#AA4499"),
-#     "softmax": hex_color_to_tuple("#882255"),
-# }
 colors = {
     "monarch-attention": hex_color_to_tuple("#E69F00"),
     "performer": hex_color_to_tuple("#CC79A7"),
@@ -63,7 +54,7 @@ def plot_results(
     """Plots a metric vs. FLOPs, optionally with a broken y-axis."""
 
     plotted_types = {}  # To store handles for the legend
-    min_quality = 0
+    min_quality = 80
     max_quality = 100
     quality_range = max_quality - min_quality
     padding = quality_range * 0.05  # Add 5% padding
@@ -103,32 +94,18 @@ def plot_results(
 
 
 def main():
-    fig, axes = plt.subplots(ncols=2, figsize=(14, 5))
+    # fig, axes = plt.subplots(ncols=2, figsize=(14, 5))
+    fig, ax = plt.subplots(figsize=(7, 5))
 
-    # ViT plot
-    SAVE_DIR = "vit/results"
+    # GPS plot
+    SAVE_DIR = "gps/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:
             result = json.load(f)
             results.append(result)
 
-    plotted_types = plot_results(
-        axes[0], results, metric_name="top-5 accuracy", title="ViT ImageNet"
-    )
-
-    # RoBERTa plot
-
-    SAVE_DIR = "roberta/results"
-    results = []
-    for result_string in os.listdir(SAVE_DIR):
-        with open(os.path.join(SAVE_DIR, result_string), "r") as f:
-            result = json.load(f)
-            results.append(result)
-
-    plotted_types = plot_results(
-        axes[1], results, metric_name="f1", title="RoBERTa SQuAD"
-    )
+    plotted_types = plot_results(ax, results, metric_name="accuracy", title="GPS Actor")
 
     fig.subplots_adjust(right=0.78)
     fig.legend(
@@ -139,7 +116,7 @@ def main():
         # fontsize="small",
     )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
-    fig.savefig("figures/vit_roberta_results.pdf", bbox_inches="tight")
+    fig.savefig("figures/gps_results.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

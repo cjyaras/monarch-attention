@@ -1,17 +1,19 @@
+import torch
+
 from common.logging import Logger
 from gps.config import CustomGPSConfig, get_config
 from gps.data import ActorData, get_processed_dataset
 from gps.model import GPSModel, get_model
 
 
+@torch.no_grad()
 def compute_accuracy(model: GPSModel, data: ActorData) -> float:
-    predictions = model(data.node_features, data.edge_index)[data.train_mask]
+    mask = data.train_mask
+    predictions = model(data.node_features, data.edge_index)[mask]
     predicted_classes = predictions.argmax(dim=1)
-    correct_predictions = (
-        (predicted_classes == data.labels[data.train_mask]).sum().item()
-    )
-    total_samples = data.train_mask.sum().item()
-    return correct_predictions / total_samples
+    correct_predictions = (predicted_classes == data.labels[mask]).sum().item()
+    total_samples = mask.sum().item()
+    return 100 * correct_predictions / total_samples
 
 
 class Evaluator:
