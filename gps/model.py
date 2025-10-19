@@ -135,7 +135,7 @@ def get_model(config: CustomGPSConfig, pretrained: bool = True) -> GPSModel:
     device = get_device()
     model = GPSModel(config)
     if pretrained:
-        model.load_state_dict(torch.load("gps/gps_model.pth", map_location=device))
+        model.load_state_dict(torch.load("gps/gps_model.pt", map_location=device))
     model = model.to(device)
     model.train()
     return model
