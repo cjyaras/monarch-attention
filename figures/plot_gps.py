@@ -54,8 +54,8 @@ def plot_results(
     """Plots a metric vs. FLOPs, optionally with a broken y-axis."""
 
     plotted_types = {}  # To store handles for the legend
-    min_quality = 80
-    max_quality = 100
+    min_quality = 90
+    max_quality = 92
     quality_range = max_quality - min_quality
     padding = quality_range * 0.05  # Add 5% padding
 
@@ -77,6 +77,7 @@ def plot_results(
         label = attention_type if attention_type not in plotted_types else ""
 
         # Plot on all relevant axes
+        ax.set_xscale("log")
         scatter = ax.scatter(
             flops,
             quality,
@@ -98,14 +99,16 @@ def main():
     fig, ax = plt.subplots(figsize=(7, 5))
 
     # GPS plot
-    SAVE_DIR = "gps/results"
+    SAVE_DIR = "gps_pubmed/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:
             result = json.load(f)
             results.append(result)
 
-    plotted_types = plot_results(ax, results, metric_name="accuracy", title="GPS Actor")
+    plotted_types = plot_results(
+        ax, results, metric_name="accuracy", title="GPS PubMed"
+    )
 
     fig.subplots_adjust(right=0.78)
     fig.legend(
@@ -116,7 +119,7 @@ def main():
         # fontsize="small",
     )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
-    fig.savefig("figures/gps_results.pdf", bbox_inches="tight")
+    fig.savefig("figures/gps_results_2.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

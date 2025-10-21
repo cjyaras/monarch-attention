@@ -14,7 +14,7 @@ from common.baselines import (
     Softmax,
 )
 from common.utils import get_device
-from gps.config import AttentionType, CustomGPSConfig
+from gps_pubmed.config import AttentionType, CustomGPSConfig
 from ma.monarch_attention import MonarchAttention
 
 Tensor = torch.Tensor
@@ -69,6 +69,7 @@ class GPSAttention(nn.Module):
         self.hidden_dims = config.hidden_dims
         self.num_heads = config.num_heads
         self.head_dims = config.hidden_dims // config.num_heads
+        self.attn_dropout_p = config.attn_dropout_p
 
     def transpose_for_scores(self, x: Tensor) -> Tensor:
         new_x_shape = x.size()[:-1] + (self.num_heads, self.head_dims)
@@ -80,7 +81,13 @@ class GPSAttention(nn.Module):
         key = self.transpose_for_scores(self.key(hidden_states))
         value = self.transpose_for_scores(self.value(hidden_states))
 
-        attn_output = self.attn_module(query, key, value)
+        attn_output = (
+            self.attn_module(query, key, value)
+            if not self.training
+            else F.scaled_dot_product_attention(
+                query, key, value, dropout_p=self.attn_dropout_p
+            )
+        )
 
         attn_output = attn_output.permute(0, 2, 1, 3).contiguous()
         new_attn_output_shape = attn_output.size()[:-2] + (self.hidden_dims,)
@@ -94,17 +101,24 @@ class GPSLayer(nn.Module):
     def __init__(self, config: CustomGPSConfig):
         super().__init__()
         self.mpnn = gnn.GCNConv(config.hidden_dims, config.hidden_dims)
+        self.dropout_mpnn = nn.Dropout(p=config.dropout_p)
         self.attn = GPSAttention(config)
+        self.dropout_attn = nn.Dropout(p=config.dropout_p)
         self.ffn = nn.Sequential(
             nn.Linear(config.hidden_dims, 2 * config.hidden_dims),
             nn.GELU(),
+            nn.Dropout(p=config.dropout_p),
             nn.Linear(2 * config.hidden_dims, config.hidden_dims),
+            nn.Dropout(p=config.dropout_p),
         )
 
     def forward(self, hidden_states: Tensor, edge_index: Tensor) -> Tensor:
-        mpnn_hidden_states = self.mpnn(hidden_states, edge_index) + hidden_states
+        mpnn_hidden_states = (
+            self.dropout_mpnn(self.mpnn(hidden_states, edge_index)) + hidden_states
+        )
         attn_hidden_states = (
-            self.attn(hidden_states.unsqueeze(0)).squeeze(0) + hidden_states
+            self.dropout_attn(self.attn(hidden_states.unsqueeze(0)).squeeze(0))
+            + hidden_states
         )
         hidden_states = mpnn_hidden_states + attn_hidden_states
         hidden_states = self.ffn(hidden_states) + hidden_states
@@ -133,7 +147,8 @@ def get_model(config: CustomGPSConfig, pretrained: bool = True) -> GPSModel:
     device = get_device()
     model = GPSModel(config)
     if pretrained:
-        model.load_state_dict(torch.load("gps/gps_model.pt", map_location=device))
+        model.load_state_dict(
+            torch.load("gps_pubmed/gps_model.pt", map_location=device)
+        )
     model = model.to(device)
-    model.train()
     return model

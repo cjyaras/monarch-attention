@@ -18,9 +18,9 @@ def get_dataset(
     return dataset
 
 
-#def get_processed_dataset(
+# def get_processed_dataset(
 #    num_samples: Optional[int] = None, split: str = "validation"
-#) -> Dataset:
+# ) -> Dataset:
 #    device = get_device()
 #    dataset = get_dataset(num_samples, split=split)
 #    processor = get_processor()
