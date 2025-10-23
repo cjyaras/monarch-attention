@@ -118,7 +118,7 @@ def main():
         # fontsize="small",
     )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
-    fig.savefig("figures/gps_results_3.pdf", bbox_inches="tight")
+    fig.savefig("figures/gps_results.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

@@ -17,7 +17,6 @@ def main():
     config = get_config()
     config.attention_type = AttentionType.monarch_attention
     config.block_size = 128
-    # for num_steps in [4, 12, 22, 30]:
     for num_steps in [1, 2, 3, 4]:
         config.num_steps = num_steps
         evaluator.evaluate_and_save(config)
