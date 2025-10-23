@@ -13,7 +13,8 @@ from common.baselines import (
     Softmax,
 )
 from ma.monarch_attention import MonarchAttention
-from tokengt.config import AttentionType, CustomTokenGTConfig
+from tokengt.config import POS_EMB_DIMS, AttentionType, CustomTokenGTConfig
+from tokengt.data import Data
 
 PRETRAINED_PATH = "tokengt/token_gt_model.pt"
 
@@ -56,16 +57,17 @@ class TokenGTEmbedding(nn.Module):
 
     def __init__(self, config: CustomTokenGTConfig):
         super().__init__()
+        type_emb_dims = config.input_dims
 
         # edge features are a learnable parameter
         self.edge_features = nn.Parameter(torch.randn(1, config.input_dims))
 
         # the type of token: node or edge
-        self.token_type_embedding = nn.Parameter(torch.randn(2, config.type_emb_dims))
+        self.token_type_embedding = nn.Parameter(torch.randn(2, type_emb_dims))
 
         # linear projection to hidden dimensions
         self.projection = nn.Linear(
-            config.input_dims + 2 * config.pos_emb_dims + config.type_emb_dims,
+            config.input_dims + 2 * POS_EMB_DIMS + type_emb_dims,
             config.hidden_dims,
         )
 
@@ -155,9 +157,9 @@ class EncoderBlock(nn.Module):
         super().__init__()
         self.self_attn = TokenGTSelfAttention(config)
         self.ffn = nn.Sequential(
-            nn.Linear(config.hidden_dims, 4 * config.hidden_dims),
+            nn.Linear(config.hidden_dims, 2 * config.hidden_dims),
             nn.GELU(),
-            nn.Linear(4 * config.hidden_dims, config.hidden_dims),
+            nn.Linear(2 * config.hidden_dims, config.hidden_dims),
         )
         self.norm1 = nn.RMSNorm(config.hidden_dims)
         self.norm2 = nn.RMSNorm(config.hidden_dims)

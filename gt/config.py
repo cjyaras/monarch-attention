@@ -14,17 +14,16 @@ class AttentionType(StrEnum):
     linear_attention = "linear-attention"
 
 
-POS_EMB_DIMS = 4
-
-
 @dataclass
-class CustomTokenGTConfig:
+class CustomGTConfig:
     input_dims: int
     output_dims: int
     hidden_dims: int = 96
-    num_layers: int = 1
-    num_heads: int = 1
-    dropout_p: float = 0.1
+    pos_enc_dims: int = 16
+    num_layers: int = 4
+    num_heads: int = 8
+    dropout_p: float = 0.5
+    attn_dropout_p: float = 0.5
     attention_type: AttentionType = AttentionType.softmax
     enable_flash_attention: bool = False
     num_steps: int | None = None
@@ -33,5 +32,5 @@ class CustomTokenGTConfig:
     pad_type: PadType = PadType.post
 
 
-def get_config(input_dims: int, output_dims: int) -> CustomTokenGTConfig:
-    return CustomTokenGTConfig(input_dims=input_dims, output_dims=output_dims)
+def get_config(input_dims: int, output_dims: int) -> CustomGTConfig:
+    return CustomGTConfig(input_dims=input_dims, output_dims=output_dims)

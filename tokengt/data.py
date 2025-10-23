@@ -1,21 +1,18 @@
 from torch_geometric.data import Data
-from torch_geometric.datasets import Planetoid, WikipediaNetwork
+from torch_geometric.datasets import Planetoid
 from torch_geometric.transforms import AddLaplacianEigenvectorPE
 
+from tokengt.config import POS_EMB_DIMS
 
-def get_processed_data(pos_emb_dims: int) -> Data:
-    transform = AddLaplacianEigenvectorPE(k=pos_emb_dims, attr_name="pe")
-    # dataset = Planetoid("data/", name="Cora", transform=transform)
-    # dataset = Planetoid("data/", name="Cora", transform=transform)
-    # dataset = WikipediaNetwork("data/", name="chameleon", transform=transform)
+
+def get_processed_data() -> Data:
+    transform = AddLaplacianEigenvectorPE(k=POS_EMB_DIMS, attr_name="pe")
     dataset = Planetoid("data/", name="PubMed", transform=transform, split="full")
     data = dataset[0]
-    # data.train_mask = data.train_mask[:, 0]
-    # data.val_mask = data.val_mask[:, 0]
-    # data.test_mask = data.test_mask[:, 0]
     return data  # pyright: ignore[reportReturnType]
 
 
-if __name__ == "__main__":
-    data = get_processed_data(16)
-    print(data)
+def get_input_output_dims(data: Data) -> tuple[int, int]:
+    input_dim = data.x.size(1)  # type: ignore
+    output_dim = int(data.y.max().item()) + 1  # type: ignore
+    return input_dim, output_dim

@@ -1,26 +1,28 @@
 import torch
 
 from tokengt.config import AttentionType, CustomTokenGTConfig
-from tokengt.data import get_processed_data
+from tokengt.data import get_input_output_dims, get_processed_data
 from tokengt.evaluation import compute_accuracy
 from tokengt.model import PRETRAINED_PATH, get_model
 
 Tensor = torch.Tensor
 
 LEARNING_RATE: float = 1e-3
-WEIGHT_DECAY: float = 1e-3
-NUM_STEPS: int = 500
+WEIGHT_DECAY: float = 1e-4
+NUM_STEPS: int = 1000
 EVAL_FREQ: int = 1
 
 
 def main():
-    config = CustomTokenGTConfig()
-    config.attention_type = AttentionType.nystromformer
-    config.rank = 64
+    data = get_processed_data()
+    input_dims, output_dims = get_input_output_dims(data)
+    config = CustomTokenGTConfig(input_dims, output_dims)
+    config.attention_type = AttentionType.monarch_attention
     config.num_steps = 1
-    config.block_size = 300
+    config.block_size = 64
+    # config.attention_type = AttentionType.softmax
+    # config.enable_flash_attention = True
     model = get_model(config, pretrained=False)
-    data = get_processed_data(config.pos_emb_dims)
 
     loss_fn = torch.nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(
@@ -37,7 +39,6 @@ def main():
         )
         loss: Tensor = loss_fn(outputs[data.train_mask], data.y[data.train_mask])  # type: ignore
         loss.backward()
-        optimizer.step()
 
         if (step + 1) % EVAL_FREQ == 0:
             model.eval()
@@ -51,8 +52,11 @@ def main():
             print(
                 f"Step: {step:02d} | Loss: {loss.item():.4f} | Val Accuracy: {accuracy:.4f}"
             )
+
         else:
             print(f"Step: {step:02d} | Loss: {loss.item():.4f}")
+
+        optimizer.step()
 
     torch.save(model.state_dict(), PRETRAINED_PATH)
 

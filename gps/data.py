@@ -22,7 +22,7 @@ class ActorData:
 def get_processed_dataset() -> ActorData:
     split_version: int = 0
     device = get_device()
-    data = torch_geometric.datasets.Actor(".")[0]
+    data = torch_geometric.datasets.Actor("data/")[0]
 
     assert isinstance(data, torch_geometric.data.Data)
     assert isinstance(data.x, Tensor)

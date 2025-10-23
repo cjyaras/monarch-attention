@@ -8,7 +8,6 @@ SAVE_DIR = "gps/results"
 
 @torch.no_grad()
 def main():
-
     evaluator = Evaluator(save_dir=SAVE_DIR)
 
     config = get_config()
@@ -18,13 +17,14 @@ def main():
     config = get_config()
     config.attention_type = AttentionType.monarch_attention
     config.block_size = 128
-    for num_steps in [4, 12, 22, 30]:
+    # for num_steps in [4, 12, 22, 30]:
+    for num_steps in [1, 2, 3, 4]:
         config.num_steps = num_steps
         evaluator.evaluate_and_save(config)
 
     config = get_config()
     config.attention_type = AttentionType.nystromformer
-    for rank in [128, 256, 384, 448, 480]:
+    for rank in [128, 192, 256, 320]:
         config.rank = rank
         evaluator.evaluate_and_save(config)
 
