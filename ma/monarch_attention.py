@@ -1,12 +1,32 @@
+from collections.abc import Callable
 from enum import StrEnum
 
 import torch
 import torch.nn as nn
 
 from ma.ma_torch import monarch_attention_torch
-from ma.ma_triton import monarch_attention_triton
 
 Tensor = torch.Tensor
+
+MonarchAttentionFn = Callable[
+    [Tensor, Tensor, Tensor, Tensor | None, int, int, bool], Tensor
+]
+
+_IMPLEMENTATIONS: dict[str, MonarchAttentionFn] = {}
+
+
+def register_impl(name: str, fn: MonarchAttentionFn) -> None:
+    _IMPLEMENTATIONS[name] = fn
+
+
+register_impl("torch", monarch_attention_torch)
+
+try:
+    from ma.ma_triton import monarch_attention_triton
+
+    register_impl("triton", monarch_attention_triton)
+except ImportError:
+    pass
 
 
 class PadType(StrEnum):
@@ -16,38 +36,19 @@ class PadType(StrEnum):
 
 class MonarchAttention(nn.Module):
 
-    def __init__(
-        self,
-        block_size: int,
-        num_steps: int,
-        pad_type: PadType,
-        impl: str | None = None,
-    ):
+    def __init__(self, block_size, num_steps, pad_type, impl="torch"):
         super().__init__()
         self.block_size = block_size
         self.num_steps = num_steps
         self.pad_type = pad_type
 
-        # Triton version is giving incorrect results at the moment, setting to torch implementation
-        impl = "torch"
+        if impl not in _IMPLEMENTATIONS:
+            available = ", ".join(sorted(_IMPLEMENTATIONS))
+            raise ValueError(f"Unknown impl {impl!r}. Available: {available}")
+        self._impl_fn = _IMPLEMENTATIONS[impl]
 
-        # if impl is None:
-        #     impl = "triton" if torch.cuda.is_available() else "torch"
-
-        self.impl = impl
-
-    def forward(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attention_mask: Tensor | None = None,
-    ) -> Tensor:
-        return (
-            monarch_attention_triton
-            if self.impl == "triton"
-            else monarch_attention_torch
-        )(
+    def forward(self, query, key, value, attention_mask=None):
+        return self._impl_fn(
             query,
             key,
             value,
@@ -57,13 +58,8 @@ class MonarchAttention(nn.Module):
             self.pad_type == PadType.pre,
         )
 
-    def get_matrix(
-        self,
-        query: Tensor,
-        key: Tensor,
-        attention_mask: Tensor | None = None,
-    ) -> Tensor:
-        batch_size, num_heads, seq_len, head_dim = query.shape
+    def get_matrix(self, query, key, attention_mask=None):
+        batch_size, num_heads, seq_len, _ = query.shape
         value = torch.eye(seq_len, device=query.device).expand(
             batch_size, num_heads, seq_len, seq_len
         )

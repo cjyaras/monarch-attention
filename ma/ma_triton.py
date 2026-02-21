@@ -73,7 +73,8 @@ def _al_cl_kernel(
     range_n = B * idx_m + range_b
 
     mask_b = range_b < B
-    k_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else (range_n < N))
+    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else (range_n < N))
+    k_mask_b = pad_mask_b
     mask_d = range_d < D
 
     if HAS_ATTN_MASK:
@@ -85,10 +86,10 @@ def _al_cl_kernel(
         )
         valid_token_mask = tl.load(
             mask_block_ptr,
-            mask=k_mask_b,
+            mask=pad_mask_b,
             other=0,
         )
-        k_mask_b = k_mask_b & valid_token_mask
+        k_mask_b = pad_mask_b & valid_token_mask
 
     # Load ar
     ar_block_ptr = (
@@ -103,7 +104,7 @@ def _al_cl_kernel(
     )
     ar = tl.load(
         ar_block_ptr,
-        mask=(k_mask_b if is_first_call else mask_b)[:, None] & mask_d[None, :],
+        mask=(pad_mask_b if is_first_call else mask_b)[:, None] & mask_d[None, :],
         other=0.0,
     )
 
@@ -363,6 +364,7 @@ def _al_y_cl_kernel(
     B: int,
     D: int,
     N: int,
+    is_first_call: int,
     sm_scale: float,
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_B: tl.constexpr,
@@ -383,7 +385,8 @@ def _al_y_cl_kernel(
     range_n = B * idx_m + range_b
 
     mask_b = range_b < B
-    k_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else range_n < N)
+    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else range_n < N)
+    k_mask_b = pad_mask_b
     mask_d = range_d < D
 
     if HAS_ATTN_MASK:
@@ -395,10 +398,10 @@ def _al_y_cl_kernel(
         )
         valid_token_mask = tl.load(
             mask_block_ptr,
-            mask=k_mask_b,
+            mask=pad_mask_b,
             other=0,
         )
-        k_mask_b = k_mask_b & valid_token_mask
+        k_mask_b = pad_mask_b & valid_token_mask
 
     # Load ar
     ar_block_ptr = (
@@ -406,11 +409,14 @@ def _al_y_cl_kernel(
         + stride_ar_e * idx_e
         + stride_ar_h * idx_h
         + stride_ar_m * idx_m
-        + (stride_ar_b * range_b[:, None] + stride_ar_d * range_d[None, :])
+        + (
+            stride_ar_b * (range_b - (pad_offset if is_first_call else 0))[:, None]
+            + stride_ar_d * range_d[None, :]
+        )
     )
     ar = tl.load(
         ar_block_ptr,
-        mask=mask_b[:, None] & mask_d[None, :],
+        mask=(pad_mask_b if is_first_call else mask_b)[:, None] & mask_d[None, :],
         other=0.0,
     )
 
@@ -642,7 +648,6 @@ def monarch_attention_triton(
     pre_pad: bool,
     eps: float = 0.0,
 ) -> Tensor:
-    assert T > 1
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 
@@ -682,9 +687,10 @@ def monarch_attention_triton(
     for t in range(T - 1):
         is_first_call = t == 0
         _ar = q if is_first_call else ar
+        _ar_strides = q_strides if is_first_call else ar_strides
         _al_cl_kernel[grid_ehm](
             _ar,
-            *ar_strides,
+            *_ar_strides,
             k,
             *k_strides,
             cr,
@@ -728,9 +734,13 @@ def monarch_attention_triton(
     y = torch.empty_like(al)
     y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
 
+    is_first_call_y = T == 1
+    _ar_y = q if is_first_call_y else ar
+    _ar_y_strides = q_strides if is_first_call_y else ar_strides
+
     _al_y_cl_kernel[grid_ehm](
-        ar,
-        *ar_strides,
+        _ar_y,
+        *_ar_y_strides,
         k,
         *k_strides,
         v,
@@ -746,6 +756,7 @@ def monarch_attention_triton(
         attn_mask,
         *attn_mask_strides,
         *HMBDN,
+        is_first_call=is_first_call_y,
         sm_scale=sm_scale,
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
         BLOCK_B=BLOCK_B,  # type: ignore
