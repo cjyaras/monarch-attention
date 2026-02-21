@@ -40,14 +40,15 @@ def plot_results(
     """Plots a metric vs. FLOPs, optionally with a broken y-axis."""
 
     plotted_types = {}  # To store handles for the legend
-    min_quality = 0
+    min_quality = 80
     max_quality = 100
     quality_range = max_quality - min_quality
     padding = quality_range * 0.05  # Add 5% padding
 
     ax.set_ylim(min_quality - padding, max_quality + padding)
     ax.set_xlabel("Total Attention FLOPs")
-    ax.set_ylabel(metric_name.capitalize())
+    # ax.set_ylabel(metric_name.capitalize())
+    ax.set_ylabel("Train Accuracy")
     ax.set_title(title)
     ax.grid(True, linestyle="--", alpha=0.6)
 
@@ -62,6 +63,7 @@ def plot_results(
         label = attention_type if attention_type not in plotted_types else ""
 
         # Plot on all relevant axes
+        ax.set_xscale("log")
         scatter = ax.scatter(
             flops,
             quality,
@@ -79,32 +81,17 @@ def plot_results(
 
 
 def main():
-    fig, axes = plt.subplots(ncols=2, figsize=(14, 5))
+    fig, ax = plt.subplots(figsize=(7, 5))
 
-    # ViT plot
-    SAVE_DIR = "experiments/vit/results"
+    # GPS plot
+    SAVE_DIR = "experiments/gps/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:
             result = json.load(f)
             results.append(result)
 
-    plotted_types = plot_results(
-        axes[0], results, metric_name="top-5 accuracy", title="ViT ImageNet"
-    )
-
-    # RoBERTa plot
-
-    SAVE_DIR = "experiments/roberta/results"
-    results = []
-    for result_string in os.listdir(SAVE_DIR):
-        with open(os.path.join(SAVE_DIR, result_string), "r") as f:
-            result = json.load(f)
-            results.append(result)
-
-    plotted_types = plot_results(
-        axes[1], results, metric_name="f1", title="RoBERTa SQuAD"
-    )
+    plotted_types = plot_results(ax, results, metric_name="accuracy", title="GPS Actor")
 
     fig.subplots_adjust(right=0.78)
     fig.legend(
@@ -115,7 +102,7 @@ def main():
         # fontsize="small",
     )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
-    fig.savefig("figures/vit_roberta_results.pdf", bbox_inches="tight")
+    fig.savefig("experiments/figures/gps_results.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,7 @@ import torch_geometric.data
 import torch_geometric.datasets
 import torch_geometric.utils
 
-from common.utils import get_device, move
+from experiments.common.utils import get_device, move
 
 Tensor = torch.Tensor
 

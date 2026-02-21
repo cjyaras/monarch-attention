@@ -7,7 +7,7 @@ from transformers.pipelines.text2text_generation import (
 )
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from common.utils import get_device
+from experiments.common.utils import get_device
 
 from experiments.bart.config import CustomBartConfig
 from experiments.bart.model import CustomBartForConditionalGeneration, get_model

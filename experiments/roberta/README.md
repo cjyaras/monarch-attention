@@ -26,10 +26,10 @@ Evaluation uses 1024 samples with batch size 8.
 Generate the F1 vs. FLOPs figure (combined with ViT results):
 
 ```bash
-python -m figures.plot_vit_roberta
+python -m experiments.figures.plot_vit_roberta
 ```
 
-Output: `figures/vit_roberta_results.pdf`
+Output: `experiments/figures/vit_roberta_results.pdf`
 
 This produces a two-panel figure with ViT top-5 accuracy (left) and RoBERTa F1 (right).
 
@@ -41,6 +41,6 @@ Generate attention map comparisons across mechanisms:
 python -m experiments.roberta.visualize_attentions
 ```
 
-Output: `figures/roberta_attention_maps.pdf`
+Output: `experiments/figures/roberta_attention_maps.pdf`
 
 The script extracts query/key tensors (cached to `experiments/roberta/query.pt`, `experiments/roberta/key.pt`, `experiments/roberta/attention_mask.pt`) and visualizes attention maps at layer 5, head 5 for Softmax, Monarch Attention, Performer, Nystromformer, Cosformer, and LinearAttention.

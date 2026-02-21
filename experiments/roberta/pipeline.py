@@ -8,7 +8,7 @@ from transformers.pipelines.question_answering import (
 )
 from transformers.tokenization_utils import PreTrainedTokenizer
 
-from common.utils import get_device
+from experiments.common.utils import get_device
 from experiments.roberta.config import CustomRobertaConfig
 from experiments.roberta.model import CustomRobertaForQuestionAnswering, get_model
 from experiments.roberta.processor import get_processor

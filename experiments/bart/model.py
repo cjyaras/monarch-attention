@@ -14,7 +14,7 @@ from transformers.models.bart.modeling_bart import (
 from transformers.modeling_outputs import BaseModelOutputWithPastAndCrossAttentions
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from common.baselines import (
+from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
     Linformer,
@@ -22,7 +22,7 @@ from common.baselines import (
     Performer,
     Softmax,
 )
-from common.utils import get_device
+from experiments.common.utils import get_device
 from ma.monarch_attention import MonarchAttention
 from experiments.bart.config import AttentionType, CustomBartConfig
 

@@ -2,7 +2,7 @@ from typing import Optional
 
 from datasets import Dataset, load_dataset
 
-from common.utils import get_device, move
+from experiments.common.utils import get_device, move
 from experiments.roberta.processor import get_processor
 
 MAX_LENGTH = 384

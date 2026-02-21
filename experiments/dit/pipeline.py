@@ -12,7 +12,7 @@ from diffusers.schedulers import KarrasDiffusionSchedulers
 from diffusers.utils import is_torch_xla_available
 from diffusers.utils.torch_utils import randn_tensor
 
-from common.utils import get_device
+from experiments.common.utils import get_device
 
 if is_torch_xla_available():
     import torch_xla.core.xla_model as xm

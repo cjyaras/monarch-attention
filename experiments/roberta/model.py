@@ -9,7 +9,7 @@ from transformers.models.roberta.modeling_roberta import (
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from common.baselines import (
+from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
     Linformer,
@@ -17,7 +17,7 @@ from common.baselines import (
     Performer,
     Softmax,
 )
-from common.utils import get_device
+from experiments.common.utils import get_device
 from ma.monarch_attention import MonarchAttention
 from experiments.roberta.config import AttentionType, CustomRobertaConfig
 

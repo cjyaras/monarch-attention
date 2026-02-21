@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import torch
 
-from common.baselines import (
+from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
     Nystromformer,
@@ -89,7 +89,7 @@ def main():
         ax[i].set_xticks([])
         ax[i].set_yticks([])
 
-    fig.savefig("figures/roberta_attention_maps.pdf", bbox_inches="tight")
+    fig.savefig("experiments/figures/roberta_attention_maps.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

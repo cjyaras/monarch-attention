@@ -2,7 +2,7 @@ from typing import Dict, Optional
 
 from evaluate import ImageClassificationEvaluator
 
-from common.logging import Logger
+from experiments.common.logging import Logger
 from experiments.vit.config import CustomViTConfig
 from experiments.vit.data import get_dataset
 from experiments.vit.metric import TopKAccuracy

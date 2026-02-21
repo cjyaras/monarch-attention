@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch_geometric.nn as gnn
 
-from common.baselines import (
+from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
     Linformer,
@@ -13,7 +13,7 @@ from common.baselines import (
     Performer,
     Softmax,
 )
-from common.utils import get_device
+from experiments.common.utils import get_device
 from experiments.gps.config import AttentionType, CustomGPSConfig
 from ma.monarch_attention import MonarchAttention
 

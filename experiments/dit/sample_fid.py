@@ -12,7 +12,7 @@ from experiments.dit.config import AttentionType
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
-from common.utils import get_device
+from experiments.common.utils import get_device
 
 device = get_device()
 

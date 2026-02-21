@@ -2,7 +2,7 @@ from typing import Dict
 
 from evaluate import SummarizationEvaluator
 
-from common.logging import Logger
+from experiments.common.logging import Logger
 from experiments.bart.config import CustomBartConfig
 from experiments.bart.data import get_dataset
 from experiments.bart.pipeline import get_pipeline, CustomSummarizationPipeline

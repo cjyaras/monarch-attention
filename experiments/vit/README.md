@@ -26,10 +26,10 @@ Evaluation uses 1024 samples with batch size 8, measuring top-5 accuracy.
 Generate the accuracy vs. FLOPs figure (combined with RoBERTa results):
 
 ```bash
-python -m figures.plot_vit_roberta
+python -m experiments.figures.plot_vit_roberta
 ```
 
-Output: `figures/vit_roberta_results.pdf`
+Output: `experiments/figures/vit_roberta_results.pdf`
 
 This produces a two-panel figure with ViT top-5 accuracy (left) and RoBERTa F1 (right).
 
@@ -41,6 +41,6 @@ Generate attention map comparisons across mechanisms:
 python -m experiments.vit.visualize_attentions
 ```
 
-Output: `figures/attention_maps.pdf`
+Output: `experiments/figures/attention_maps.pdf`
 
 The script extracts query/key tensors (cached to `experiments/vit/query.pt`, `experiments/vit/key.pt`) and visualizes attention maps at layer 3, head 3 for Softmax, Monarch Attention (block_size=14, num_steps=2), Performer, Nystromformer, Cosformer, and LinearAttention.

@@ -2,8 +2,8 @@ from typing import Optional
 
 from datasets import Dataset, IterableDataset, load_dataset
 
-from common.data import dataset_from_iterable
-from common.utils import get_device, move
+from experiments.common.data import dataset_from_iterable
+from experiments.common.utils import get_device, move
 from experiments.vit.processor import get_processor
 
 

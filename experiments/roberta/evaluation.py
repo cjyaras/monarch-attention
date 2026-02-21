@@ -2,7 +2,7 @@ from typing import Dict
 
 from evaluate import QuestionAnsweringEvaluator
 
-from common.logging import Logger
+from experiments.common.logging import Logger
 from experiments.roberta.config import CustomRobertaConfig
 from experiments.roberta.data import get_dataset
 from experiments.roberta.pipeline import CustomQuestionAnsweringPipeline, get_pipeline

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
-from common.baselines import Softmax, Nystromformer
+from experiments.common.baselines import Softmax, Nystromformer
 from ma.monarch_attention import MonarchAttention, PadType
 from experiments.dit.extract import extract_query_key
 from experiments.dit.config import AttentionType

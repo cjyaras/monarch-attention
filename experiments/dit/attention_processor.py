@@ -3,7 +3,7 @@ from typing import Dict, Optional
 import torch
 from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 
-from common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax, LinearAttention
+from experiments.common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax, LinearAttention
 from ma.monarch_attention import MonarchAttention
 from experiments.dit.config import AttentionType, EfficientAttnConfig
 

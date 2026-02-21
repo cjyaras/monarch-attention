@@ -175,7 +175,7 @@ def main():
         # fontsize="small",
     )
 
-    fig.savefig("figures/bart_results.pdf", bbox_inches="tight")
+    fig.savefig("experiments/figures/bart_results.pdf", bbox_inches="tight")
 
 
 if __name__ == "__main__":

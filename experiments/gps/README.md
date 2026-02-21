@@ -31,7 +31,7 @@ Results are saved as JSON files in `experiments/gps/results/`. The script evalua
 Generate the accuracy vs. FLOPs figure:
 
 ```bash
-python -m figures.plot_gps
+python -m experiments.figures.plot_gps
 ```
 
-Output: `figures/gps_results.pdf`
+Output: `experiments/figures/gps_results.pdf`
