@@ -82,7 +82,7 @@ def main():
     fig, axes = plt.subplots(ncols=2, figsize=(14, 5))
 
     # ViT plot
-    SAVE_DIR = "vit/results"
+    SAVE_DIR = "experiments/vit/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:
@@ -95,7 +95,7 @@ def main():
 
     # RoBERTa plot
 
-    SAVE_DIR = "roberta/results"
+    SAVE_DIR = "experiments/roberta/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:

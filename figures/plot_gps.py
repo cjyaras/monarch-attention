@@ -84,7 +84,7 @@ def main():
     fig, ax = plt.subplots(figsize=(7, 5))
 
     # GPS plot
-    SAVE_DIR = "gps/results"
+    SAVE_DIR = "experiments/gps/results"
     results = []
     for result_string in os.listdir(SAVE_DIR):
         with open(os.path.join(SAVE_DIR, result_string), "r") as f:

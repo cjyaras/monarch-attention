@@ -8,5 +8,5 @@ Requires `python>=3.10`. How to run ViT benchmark:
 ```
 ./setup.sh
 source .venv/bin/activate
-python -m vit.benchmark
+python -m experiments.vit.benchmark
 ```
