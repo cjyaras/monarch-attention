@@ -1,19 +1,8 @@
-import os
 from math import sqrt
-
-DEBUG = False
-
-if DEBUG:
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-    os.environ["TRITON_INTERPRET"] = "1"
 
 import torch
 import triton
 import triton.language as tl
-
-
-def check_inputs(q, k, v):
-    pass
 
 
 Tensor = torch.Tensor
@@ -654,7 +643,6 @@ def monarch_attention_triton(
     eps: float = 0.0,
 ) -> Tensor:
     assert T > 1
-    check_inputs(q, k, v)
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 

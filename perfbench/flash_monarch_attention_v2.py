@@ -6,10 +6,6 @@ import triton
 import triton.language as tl
 
 
-def check_inputs(q, k, v):
-    pass
-
-
 Tensor = torch.Tensor
 xlogy = torch.special.xlogy
 
@@ -441,7 +437,6 @@ def flash_monarch_attention_reference(
     B: int,
     pre_pad: bool,
 ) -> Tensor:
-    check_inputs(q, k, v)
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
     N_padded = M * B

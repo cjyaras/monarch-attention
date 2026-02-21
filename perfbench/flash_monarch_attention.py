@@ -1,22 +1,10 @@
-import os
 from math import sqrt
-
-DEBUG = False
-
-if DEBUG:
-    os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
-    os.environ["TRITON_INTERPRET"] = "1"
 
 import torch
 import torch.nn.functional as F
 import triton
 import triton.language as tl
 
-# from utils import check_inputs
-
-
-def check_inputs(q, k, v):
-    pass
 
 
 Tensor = torch.Tensor
@@ -657,7 +645,6 @@ def flash_monarch_attention(
     pre_pad: bool,
 ) -> Tensor:
 
-    check_inputs(q, k, v)
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 
@@ -904,7 +891,6 @@ def flash_monarch_attention_reference(
     B: int,
     pre_pad: bool,
 ) -> Tensor:
-    check_inputs(q, k, v)
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
     N_padded = M * B

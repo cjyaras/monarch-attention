@@ -25,10 +25,6 @@ plt.rcParams.update(
 )
 
 
-# def softmax_attention(query: Tensor, key: Tensor) -> Tensor:
-#     return F.softmax(query @ key.transpose(-2, -1) / query.shape[-1] ** 0.5, dim=-1)
-
-
 @torch.no_grad()
 def main():
     if not os.path.exists("vit/query.pt"):
@@ -46,18 +42,7 @@ def main():
     query = torch.load("vit/query.pt")
     key = torch.load("vit/key.pt")
 
-    # layer = 1
-    # head = 5
-
-    # layer = 3
-    # head = 3
-
-    # layer, head = 2, 10
-
     layer, head = 3, 3
-
-    # query = query[0, layer, head, 1:50][None, None, ...]
-    # key = key[0, layer, head, 1:50][None, None, ...]
 
     query = query[0, layer, head, 1:][None, None, ...]
     key = key[0, layer, head, 1:][None, None, ...]

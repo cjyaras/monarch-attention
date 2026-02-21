@@ -13,16 +13,6 @@ def hex_color_to_tuple(hex_color: str) -> tuple[float, float, float]:
     return tuple(int(hex_color[i : i + 2], 16) / 255.0 for i in (1, 3, 5))  # type: ignore
 
 
-# Original colors map
-# colors = {
-#     "monarch-attention": hex_color_to_tuple("#332288"),
-#     "performer": hex_color_to_tuple("#44AA99"),  # Not used in BART data
-#     "cosformer": hex_color_to_tuple("#88CCEE"),  # Not used in BART data
-#     "linear-attention": hex_color_to_tuple("#DDCC77"),  # Not used in BART data
-#     "nystromformer": hex_color_to_tuple("#AA4499"),
-#     "softmax": hex_color_to_tuple("#882255"),
-# }
-
 colors = {
     "monarch-attention": hex_color_to_tuple("#E69F00"),
     "performer": hex_color_to_tuple("#CC79A7"),
@@ -94,8 +84,6 @@ def main():
     marker_legend_labels = [f"{sl}" for sl in seq_len_labels]
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))  # Increased figsize for legend
-
-    # fig, axes = plt.subplots(1, 3, figsize=(23, 5))  # Increased figsize for legend
 
     rouge_metrics_map = [
         ("rouge_1", "ROUGE-1"),
@@ -186,12 +174,6 @@ def main():
         title="Sequence Length",
         # fontsize="small",
     )
-    # fig.legend(
-    #     handles=color_handles + marker_handles,
-    #     loc="center left",
-    #     bbox_to_anchor=(0.77, 0.5),
-    #     # title="Legend",
-    # )
 
     fig.savefig("figures/bart_results.pdf", bbox_inches="tight")
 

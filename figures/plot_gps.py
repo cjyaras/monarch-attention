@@ -1,4 +1,3 @@
-import hashlib
 import json
 import os
 
@@ -25,18 +24,6 @@ def hex_color_to_tuple(hex_color: str) -> tuple[float, float, float]:
     return tuple(int(hex_color[i : i + 2], 16) / 255.0 for i in (1, 3, 5))  # type: ignore
 
 
-def get_color_from_string(s: str) -> tuple[float, float, float]:
-    """Generates a deterministic color based on a string hash."""
-    hash_object = hashlib.md5(s.encode())
-    hash_digest = hash_object.hexdigest()
-    hash_digest = hash_digest[::-1]
-    # Use the first 6 hex digits for color (RRGGBB)
-    hex_color = f"#{hash_digest[:6]}"
-    # Convert hex to RGB tuple (0-1 range)
-    h = hex_color.lstrip("#")
-    return tuple(int(h[i : i + 2], 16) / 255.0 for i in (0, 2, 4))  # type: ignore
-
-
 colors = {
     "monarch-attention": hex_color_to_tuple("#E69F00"),
     "performer": hex_color_to_tuple("#CC79A7"),
@@ -45,7 +32,6 @@ colors = {
     "nystromformer": hex_color_to_tuple("#7AA4BD"),
     "softmax": hex_color_to_tuple("#009E73"),
 }
-# colors = {method: get_color_from_string(method) for method in ordering.keys()}
 
 
 def plot_results(
@@ -73,7 +59,6 @@ def plot_results(
         flops = result["result"]["total_attention_bmm_flops"]
         attention_type = result["attention_type"]
         quality = result["result"][metric_name]
-        # color = get_color_from_string(attention_type)
         color = colors[attention_type]
         label = attention_type if attention_type not in plotted_types else ""
 
@@ -96,7 +81,6 @@ def plot_results(
 
 
 def main():
-    # fig, axes = plt.subplots(ncols=2, figsize=(14, 5))
     fig, ax = plt.subplots(figsize=(7, 5))
 
     # GPS plot
