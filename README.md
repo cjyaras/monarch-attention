@@ -10,3 +10,4 @@ Requires `python>=3.10`. How to run ViT benchmark:
 source .venv/bin/activate
 python -m experiments.vit.benchmark
 ```
+
