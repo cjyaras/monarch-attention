@@ -46,7 +46,7 @@ def parse_args():
     parser.add_argument('--cfg_scale', type=float, default=1.5)
     parser.add_argument('--seed', type=int, default=0)
     
-    parser.add_argument('--save_dir', type=str, default='/scratch/qingqu_root/qingqu1/alecx/dit_generations')
+    parser.add_argument('--save_dir', type=str, default='experiments/dit/generations/fid')
 
     parser.add_argument('--monarch_num_steps', type=int, default=3, help='Number of steps for monarch attention')
     parser.add_argument('--monarch_block_size', type=int, default=16, help='Block size for monarch attention')
