@@ -17,7 +17,10 @@ def al_cl_ref(ar, k, cr, sm_scale, mask, v=None, eps=1e-12):
     r = r_hat / (torch.sum(r_hat, dim=-1, keepdim=True) + eps)
     r = torch.clamp(r, min=torch.finfo(r.dtype).tiny)
 
-    cl = torch.sum(xlogy(r, r), dim=-1).transpose(-1, -2)
+    # A block whose keys are all masked gets cl = inf, which gives it zero
+    # weight when queries choose between blocks
+    cl = torch.sum(xlogy(r, r), dim=-1)
+    cl = torch.where(mask.any(dim=-1)[..., None], cl, float("inf")).transpose(-1, -2)
     al = sm_scale * (r.to(k.dtype) @ k).transpose(-2, -3)
     y = None if v is None else (r.to(v.dtype) @ v).transpose(-2, -3)
 

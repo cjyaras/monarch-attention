@@ -151,9 +151,14 @@ def _al_cl_kernel(
     r = r + tl.where(k_mask_b[None, :], 0.0, float("-inf"))
     r = tl.exp(r - tl.clamp(tl.max(r, axis=1, keep_dims=True), EPS, float("inf")))
     r = r / (tl.sum(r, axis=1, keep_dims=True) + EPS)
+    # A block whose keys are all masked has no attention weights (0 / 0 above)
+    block_has_keys = tl.max(k_mask_b.to(tl.int32), axis=0) > 0
+    r = tl.where(block_has_keys, r, 0.0)
 
-    # Store cl
+    # Store cl. A block whose keys are all masked gets cl = inf, which gives it
+    # zero weight when queries choose between blocks.
     cl = tl.sum(xlogx(r), axis=1)
+    cl = tl.where(block_has_keys, cl, float("inf"))
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e

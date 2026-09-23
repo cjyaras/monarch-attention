@@ -40,11 +40,11 @@ def test_exact_without_mask(device, block_size, num_steps, pad_type):
 
 
 @pytest.mark.parametrize("device", DEVICES)
-@pytest.mark.parametrize("block_size", [N, 32])
+@pytest.mark.parametrize("block_size", [1, N, 32])
 @pytest.mark.parametrize("num_steps", [1, 3])
 @pytest.mark.parametrize("pad_type", list(PadType))
 @pytest.mark.parametrize("trailing_padding", [False, True])
-def test_exact_with_mask_single_block(device, block_size, num_steps, pad_type, trailing_padding):
+def test_exact_with_mask(device, block_size, num_steps, pad_type, trailing_padding):
     q, k, v = _qkv(device)
     if trailing_padding:
         mask = torch.arange(N)[None] < torch.tensor([[17], [N]])
