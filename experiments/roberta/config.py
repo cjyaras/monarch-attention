@@ -4,7 +4,6 @@ from transformers.models.roberta.configuration_roberta import RobertaConfig
 
 from experiments.common.attention import ATTN_IMPLEMENTATION
 from ma.monarch_attention import PadType
-from experiments.roberta.data import MAX_LENGTH
 
 
 class AttentionType(StrEnum):

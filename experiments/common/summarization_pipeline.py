@@ -1,8 +1,10 @@
 # Adapted from transformers 4.53.3 `pipelines/text2text_generation.py`
 # (Apache-2.0, Copyright The HuggingFace Team), which was removed in transformers 5.
 # Changes: dropped TensorFlow branches and TranslationPipeline, PyTorch only
-# (no `framework` attribute in v5), updated imports.
+# (no `framework` attribute in v5), updated imports, and `_forward` folds
+# generation arguments into the generation config.
 
+import copy
 import enum
 import warnings
 from typing import Any, Union
@@ -199,11 +201,17 @@ class Text2TextGenerationPipeline(Pipeline):
             generate_kwargs.get("max_length", self.generation_config.max_length),
         )
 
-        # User-defined `generation_config` passed to the pipeline call take precedence
-        if "generation_config" not in generate_kwargs:
-            generate_kwargs["generation_config"] = self.generation_config
+        # User-defined `generation_config` passed to the pipeline call take precedence.
+        # Fold the remaining generation arguments into a copy of it, since transformers 5
+        # deprecates passing both.
+        generation_config = copy.deepcopy(
+            generate_kwargs.pop("generation_config", self.generation_config)
+        )
+        model_kwargs = generation_config.update(**generate_kwargs)
 
-        output_ids = self.model.generate(**model_inputs, **generate_kwargs)
+        output_ids = self.model.generate(
+            **model_inputs, generation_config=generation_config, **model_kwargs
+        )
         out_b = output_ids.shape[0]
         output_ids = output_ids.reshape(in_b, out_b // in_b, *output_ids.shape[1:])
         return {"output_ids": output_ids}

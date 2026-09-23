@@ -10,19 +10,18 @@ name = "monarch-attention"
 version = "0.0.1"
 dependencies = [
     "torch>=2.6.0",
-    "einops",
 ]
 requires-python = ">=3.11"
 authors = [
   {name = "Can Yaras", email = "cjyaras@gmail.com"},
 ]
-description = "Monarch attention."
+description = "MonarchAttention: sub-quadratic attention via Monarch matrices."
 readme = "README.md"
 license = {file = "LICENSE"}
-keywords = []
 
 [project.optional-dependencies]
 experiments = [
+    "einops",
     "numpy",
     "tqdm",
     "matplotlib",
@@ -48,3 +47,10 @@ dev = [
 # Triton compiles a C launcher at runtime and needs Python headers, which
 # system Pythons often lack; uv-managed Pythons always ship them.
 python-preference = "only-managed"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = [
+    "E741",  # single-letter index names like `l` mirror the math
+    "E731",  # `grid = lambda meta: ...` is the Triton idiom
+]

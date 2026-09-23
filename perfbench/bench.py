@@ -1,5 +1,4 @@
 import argparse
-import logging
 from enum import Enum
 from math import sqrt
 
@@ -8,17 +7,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from flash_attention import flash_attention
-from flash_monarch_attention import (  # flash_monarch_attention,
-    flash_monarch_attention_reference,
-)
-from flash_monarch_attention_v2 import (
-    flash_monarch_attention_v2 as flash_monarch_attention,
-)
-
-# from fused_flash_monarch_attention import fused_flash_monarch_attention
-from fused_flash_monarch_attention_v2 import (
-    fused_flash_monarch_attention as fused_flash_monarch_attention,
-)
+from flash_monarch_attention import flash_monarch_attention
+from fused_flash_monarch_attention import fused_flash_monarch_attention
 from triton.testing import do_bench
 
 plt.rcParams.update(
@@ -62,17 +52,17 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
 
         try:
             t1 = benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b, T)
-        except:
+        except Exception:
             t1 = float("nan")
 
         try:
             t2 = benchmark(run_mode, flash_attention, q, k, v, attn_mask)
-        except:
+        except Exception:
             t2 = float("nan")
 
         try:
             t3 = benchmark(run_mode, F.scaled_dot_product_attention, q, k, v)
-        except:
+        except Exception:
             t3 = float("nan")
 
         if all(np.isnan(t) for t in [t1, t2, t3]):
@@ -104,17 +94,17 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
             t1 = benchmark(
                 run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad
             )
-        except:
+        except Exception:
             t1 = float("nan")
 
         try:
             t2 = benchmark(run_mode, flash_attention, q, k, v, attn_mask)
-        except:
+        except Exception:
             t2 = float("nan")
 
         try:
             t3 = benchmark(run_mode, F.scaled_dot_product_attention, q, k, v)
-        except:
+        except Exception:
             t3 = float("nan")
 
         if all(np.isnan(t) for t in [t1, t2, t3]):
@@ -158,7 +148,7 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
     ax1.set_xticklabels(batch_sizes)
     ax1.grid(True, axis="y", linestyle="--", alpha=0.6)
 
-    bar3 = ax2.bar(
+    ax2.bar(
         x2 - width / 2,
         normalized_seq["monarch-attention"],
         width,
@@ -167,7 +157,7 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
         edgecolor="black",
         linewidth=1.5,
     )
-    bar4 = ax2.bar(
+    ax2.bar(
         x2 + width / 2,
         normalized_seq["softmax"],
         width,
@@ -208,7 +198,7 @@ def benchmark(run_mode, func, *args):
         print(f"{func.__name__} time: {time}")
         return time
     elif run_mode == RunMode.NCU:
-        o = func(*args)
+        func(*args)
     elif run_mode == RunMode.NSYS:
         num_iters = 20
         num_warmup_iters = 10

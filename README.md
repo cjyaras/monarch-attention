@@ -11,7 +11,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from
 uv sync --extra experiments
 ```
 
-This creates `.venv` with Python 3.14 and the pinned versions in `uv.lock`. Drop `--extra experiments` to install only the core `ma` package (`torch`, `einops`).
+This creates `.venv` with Python 3.14 and the pinned versions in `uv.lock`. Drop `--extra experiments` to install only the core `ma` package (just `torch`).
 
 To use `ma` from another project: `pip install git+https://github.com/cjyaras/monarch-attention`.
 
@@ -21,6 +21,12 @@ Run the tests (GPU tests are skipped without CUDA):
 
 ```
 uv run pytest ma/tests
+```
+
+Lint (also run in CI):
+
+```
+uvx ruff check .
 ```
 
 Run the ViT benchmark:

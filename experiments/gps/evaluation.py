@@ -1,7 +1,7 @@
 import torch
 
 from experiments.common.logging import Logger
-from experiments.gps.config import CustomGPSConfig, get_config
+from experiments.gps.config import CustomGPSConfig
 from experiments.gps.data import ActorData, get_processed_dataset
 from experiments.gps.model import GPSModel, get_model
 

@@ -1461,7 +1461,6 @@ name = "monarch-attention"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
-    { name = "einops" },
     { name = "torch" },
 ]
 
@@ -1470,6 +1469,7 @@ experiments = [
     { name = "accelerate" },
     { name = "datasets" },
     { name = "diffusers" },
+    { name = "einops" },
     { name = "evaluate", extra = ["evaluator"] },
     { name = "matplotlib" },
     { name = "nltk" },
@@ -1494,7 +1494,7 @@ requires-dist = [
     { name = "accelerate", marker = "extra == 'experiments'" },
     { name = "datasets", marker = "extra == 'experiments'" },
     { name = "diffusers", marker = "extra == 'experiments'" },
-    { name = "einops" },
+    { name = "einops", marker = "extra == 'experiments'" },
     { name = "evaluate", extras = ["evaluator"], marker = "extra == 'experiments'" },
     { name = "matplotlib", marker = "extra == 'experiments'" },
     { name = "nltk", marker = "extra == 'experiments'" },

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from ma.ma_history import monarch_attention_history
+from experiments.common.ma_history import monarch_attention_history
 
 Tensor = torch.Tensor
 

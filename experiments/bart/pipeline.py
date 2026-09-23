@@ -30,7 +30,7 @@ def get_pipeline(
     config: CustomBartConfig,
     batch_size: int = 1,
     max_length: int = 8192,
-    model_checkpoint_path: str = "./bart/finetuned/output/",
+    model_checkpoint_path: str = "experiments/bart/finetuned/output/",
 ) -> CustomSummarizationPipeline:
     pipe = pipeline(
         "custom-summarization",
@@ -41,7 +41,6 @@ def get_pipeline(
         device=get_device(),
         tokenizer=get_processor(max_length),
         batch_size=batch_size,
-        dtype="bfloat16",
         pipeline_class=CustomSummarizationPipeline,
     )
     assert isinstance(pipe, CustomSummarizationPipeline)

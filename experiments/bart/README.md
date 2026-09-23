@@ -115,4 +115,4 @@ accelerate launch --num_processes 2 --main_process_port 29551 experiments/bart/r
 
 ## Evaluation
 
-Run `python -m experiments.bart.benchmark --model_checkpoint_path="./experiments/bart/finetuned/output/"`. The script loads the fine-tuned model from `experiments/bart/finetuned/output/`.
+Run `uv run python -m experiments.bart.benchmark` from the repo root. The script loads the fine-tuned model from `experiments/bart/finetuned/output/`.

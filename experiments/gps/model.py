@@ -2,7 +2,6 @@ from typing import Tuple
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch_geometric.nn as gnn
 
 from experiments.common.baselines import (

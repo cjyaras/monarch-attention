@@ -33,10 +33,10 @@ model_subfolder = "transformer"
 
 
 layers_to_replace = list(range(14))
-attn_dict = generate_attn_dict(AttentionType.soba_monarch, layers_to_replace)
+attn_dict = generate_attn_dict(AttentionType.monarch, layers_to_replace)
 
 sm_pipe = get_pipeline(attn_type=AttentionType.softmax, model_path=model_path, model_subfolder=model_subfolder)
-soba_pipe = get_pipeline(attn_type=attn_dict, model_path=model_path, model_subfolder=model_subfolder)
+monarch_pipe = get_pipeline(attn_type=attn_dict, model_path=model_path, model_subfolder=model_subfolder)
 
 
 # pick words that exist in ImageNet
@@ -56,7 +56,7 @@ latents = torch.randn(len(words), latent_channels, latent_size, latent_size)
 
 
 # Save images
-save_path = './dit/generations/'
+save_path = 'experiments/dit/generations/'
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
@@ -73,12 +73,12 @@ save_output_images(sm_output, sm_save_path)
 
 
 # Get SOBA attention Transformer generation
-class_ids = soba_pipe.get_label_ids(words)
+class_ids = monarch_pipe.get_label_ids(words)
 
 start = time.time()
-soba_output = soba_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type = "numpy") 
-soba_gen_time = time.time() - start
+monarch_output = monarch_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type = "numpy") 
+monarch_gen_time = time.time() - start
 
-print("soba:", soba_gen_time, "seconds for", num_inference_steps, "inference steps")
-soba_save_path = os.path.join(save_path, "soba_layers_" + str(layers_to_replace[0]) + "_" + str(layers_to_replace[-1])) + ".png"
-save_output_images(soba_output, soba_save_path)
+print("monarch:", monarch_gen_time, "seconds for", num_inference_steps, "inference steps")
+monarch_save_path = os.path.join(save_path, "monarch_layers_" + str(layers_to_replace[0]) + "_" + str(layers_to_replace[-1])) + ".png"
+save_output_images(monarch_output, monarch_save_path)

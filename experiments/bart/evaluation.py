@@ -24,7 +24,7 @@ class Evaluator:
         batch_size: int,
         save_dir: str,
         max_length: int,
-        model_checkpoint_path: str = "./bart/finetuned/output/",
+        model_checkpoint_path: str = "experiments/bart/finetuned/output/",
     ):
         self.batch_size = batch_size
         self.dataset = get_dataset(num_samples=num_samples)

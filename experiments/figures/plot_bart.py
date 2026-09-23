@@ -167,7 +167,7 @@ def main():
     )  # Not strictly necessary if calling fig.legend multiple times
 
     # Create the second legend for sequence lengths (markers)
-    legend2 = fig.legend(
+    fig.legend(
         handles=marker_handles,
         loc="lower left",  # Position anchor point of the legend box
         bbox_to_anchor=(0.825, 0.2),  # Position legend box relative to figure

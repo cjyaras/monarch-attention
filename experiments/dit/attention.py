@@ -3,7 +3,7 @@ from typing import Optional
 from diffusers.models.attention import BasicTransformerBlock
 
 from experiments.dit.attention_processor import EfficientAttnProcessor
-from experiments.dit.config import AttentionType, EfficientAttnConfig
+from experiments.dit.config import EfficientAttnConfig
 
 
 class CustomBasicTransformerBlock(BasicTransformerBlock):

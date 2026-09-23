@@ -2,8 +2,6 @@ from typing import Optional
 
 from datasets import Dataset, load_dataset
 
-from experiments.common.utils import get_device, move
-from experiments.roberta.processor import get_processor
 
 MAX_LENGTH = 384
 DOC_STRIDE = 128

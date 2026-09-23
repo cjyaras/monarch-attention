@@ -6,7 +6,6 @@ import torch
 import numpy as np
 
 from experiments.common.baselines import Softmax, Nystromformer
-from ma.monarch_attention import MonarchAttention, PadType
 from experiments.dit.extract import extract_query_key
 from experiments.dit.config import AttentionType
 
@@ -33,7 +32,7 @@ def main():
         torch.save(query, "experiments/dit/query.pt")
         torch.save(key, "experiments/dit/key.pt")
 
-    if not os.path.exists("dit/query_first_half_nystrom.pt"):
+    if not os.path.exists("experiments/dit/query_first_half_nystrom.pt"):
         attn_type = generate_attn_dict(AttentionType.nystromformer, list(range(1, 15)))
         query, key = extract_query_key(
             attn_type,
@@ -41,8 +40,8 @@ def main():
             seed=0,
             num_inference_steps=1
         )
-        torch.save(query, "dit/query_first_half_nystrom.pt")
-        torch.save(key, "dit/key_first_half_nystrom.pt")
+        torch.save(query, "experiments/dit/query_first_half_nystrom.pt")
+        torch.save(key, "experiments/dit/key_first_half_nystrom.pt")
 
     layers = np.arange(14, 28)
     heads = np.arange(0, 16)
@@ -52,8 +51,8 @@ def main():
         query = torch.load("experiments/dit/query.pt")
         key = torch.load("experiments/dit/key.pt")
 
-        query_nystrom = torch.load("dit/query_first_half_nystrom.pt")
-        key_nystrom = torch.load("dit/key_first_half_nystrom.pt")
+        query_nystrom = torch.load("experiments/dit/query_first_half_nystrom.pt")
+        key_nystrom = torch.load("experiments/dit/key_first_half_nystrom.pt")
 
         query = query[[0], layer]
         key = key[[0], layer]
@@ -85,7 +84,7 @@ def main():
             ax[2].set_title('Nystromformer')
 
             fig.suptitle('Layer ' + str(layer) + ' head ' + str(head) + ' attention matrices')
-            plt.savefig('./dit/nystrom_attns/layer_' + str(layer) + '_head_' + str(head) + '_attentions.png')
+            plt.savefig('experiments/dit/nystrom_attns/layer_' + str(layer) + '_head_' + str(head) + '_attentions.png')
             plt.close()
 
 

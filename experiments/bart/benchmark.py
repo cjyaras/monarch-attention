@@ -11,12 +11,12 @@ parser = argparse.ArgumentParser(description='A benchmark for various attention 
 
 parser.add_argument(
     "--model_checkpoint_path", 
-    default="./bart/finetuned/output/",
+    default="experiments/bart/finetuned/output/",
     help="The path to the Bart checkpoint.",
 )
 parser.add_argument(
     "--save_dir",
-    default="./bart/results_softmax",
+    default="experiments/bart/results_softmax",
     help="The path to the output json files."
 )
 

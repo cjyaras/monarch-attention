@@ -3,7 +3,7 @@ from typing import Optional, Dict, List, Union
 import torch
 
 from experiments.dit.config import AttentionType, get_config
-from experiments.dit.model import CustomDiTTransformer2DModel, get_model
+from experiments.dit.model import get_model
 from diffusers import DiTPipeline
 from diffusers.models import DiTTransformer2DModel
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput

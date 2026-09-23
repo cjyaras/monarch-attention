@@ -48,7 +48,6 @@ def get_pipeline(
         device=get_device(),
         tokenizer=get_processor(),
         batch_size=batch_size,
-        dtype="float16",
     )
     assert isinstance(pipe, CustomQuestionAnsweringPipeline)
     return pipe

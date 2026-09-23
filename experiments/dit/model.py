@@ -1,11 +1,10 @@
 from typing import Optional
 
-import torch
 import torch.nn as nn
 
 from diffusers.models.transformers.dit_transformer_2d import DiTTransformer2DModel
 from experiments.dit.attention import CustomBasicTransformerBlock
-from experiments.dit.config import EfficientAttnConfig, AttentionType
+from experiments.dit.config import EfficientAttnConfig
 from experiments.common.utils import get_device
 
 class CustomDiTTransformer2DModel(DiTTransformer2DModel):

@@ -9,7 +9,6 @@ from transformers.models.bart.modeling_bart import (
     BartModel,
     BartLearnedPositionalEmbedding,
 )
-from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
 from experiments.common.baselines import (
     Cosformer,
@@ -79,11 +78,6 @@ class CustomBartDecoder(BartDecoder):
         )
         self.post_init()
 
-    def forward(self, *args, encoder_hidden_states=None, **kwargs):
-        if encoder_hidden_states is not None and encoder_hidden_states.ndim == 2:
-            encoder_hidden_states = encoder_hidden_states.unsqueeze(0)
-        return super().forward(*args, encoder_hidden_states=encoder_hidden_states, **kwargs)
-
 
 class CustomBartModel(BartModel):
     def __init__(
@@ -151,7 +145,7 @@ class CustomBartForConditionalGeneration(BartForConditionalGeneration):
 
 def get_model(
     config: CustomBartConfig,
-    model_checkpoint_path:str = "./bart/finetuned/output/",
+    model_checkpoint_path:str = "experiments/bart/finetuned/output/",
 ) -> CustomBartForConditionalGeneration:
     device = get_device()
     model = CustomBartForConditionalGeneration.from_pretrained(

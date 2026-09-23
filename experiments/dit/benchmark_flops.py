@@ -1,18 +1,13 @@
 from typing import List, Dict
 import argparse
 import torch
-import os
 
 import numpy as np
 
 from experiments.dit.config import AttentionType
 from experiments.dit.pipeline import get_pipeline, CustomDiTPipeline
-from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
-from torchvision.utils import save_image
-from experiments.common.utils import get_device
 
-import torchvision.models
 
 
 def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:
