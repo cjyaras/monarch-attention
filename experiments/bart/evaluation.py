@@ -47,7 +47,7 @@ class Evaluator:
         model = get_model(config, model_checkpoint_path=self.model_checkpoint_path)
         flops = attention_bmm_flops(
             model,
-            ["model.encoder.layers.0.self_attn"],
+            [f"model.encoder.layers.{i}.self_attn" for i in range(config.encoder_layers)],
             lambda: self.summarize(model, self.dataset[:1]["chapter"]),
         )
 
