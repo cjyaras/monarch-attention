@@ -1,3 +1,5 @@
+import argparse
+
 import torch
 
 from experiments.common.attention import AttentionType, get_mixed_type
@@ -129,5 +131,8 @@ def main():
 
 
 if __name__ == "__main__":
-    # main()
-    ablation()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--ablation", action="store_true", help="replace one layer at a time instead"
+    )
+    ablation() if parser.parse_args().ablation else main()
