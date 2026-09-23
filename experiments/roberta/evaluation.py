@@ -3,12 +3,13 @@ from typing import Dict
 from evaluate import QuestionAnsweringEvaluator
 
 from experiments.common.logging import Logger
+from experiments.common.utils import ReadyPipelineMixin
 from experiments.roberta.config import CustomRobertaConfig
 from experiments.roberta.data import get_dataset
 from experiments.roberta.pipeline import CustomQuestionAnsweringPipeline, get_pipeline
 
 
-class CustomQuestionAnsweringEvaluator(QuestionAnsweringEvaluator):
+class CustomQuestionAnsweringEvaluator(ReadyPipelineMixin, QuestionAnsweringEvaluator):
 
     def __init__(self):
         super().__init__(task="custom-question-answering")

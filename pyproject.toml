@@ -29,12 +29,14 @@ experiments = [
     "torchvision",
     "torch_geometric",
     "torchtnt",
-    "transformers>=4.51,<4.57",
+    "setuptools<81",  # torchtnt imports pkg_resources
+    "transformers>=5",
     "diffusers",
     "datasets",
-    "evaluate",
+    "evaluate[evaluator]",  # evaluator extra pulls in scipy
     "nltk",
     "rouge_score",
+    "accelerate",
 ]
 
 [dependency-groups]

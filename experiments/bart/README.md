@@ -9,9 +9,10 @@ We use the BART model to summarize the book chapter in the [Booksum](https://hug
 
 Unfortunately, the pre-trained BART supports the sequence length up to 1024. To increase the sequence length limit, we fine-tuned the model with the maximum input length of 8192 and the maximum summary length of 512.
 
-To train the model, install packages below:
+To train the model, install the experiment dependencies and `wandb` (used for `--report_to wandb`):
 ```bash
-pip install wandb datasets accelerate
+uv sync --extra experiments
+uv pip install wandb
 ```
 
 Example training command with the softmax attention:

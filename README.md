@@ -11,7 +11,7 @@ Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from
 uv sync --extra experiments
 ```
 
-This creates `.venv` with Python 3.12 and the pinned versions in `uv.lock`. Drop `--extra experiments` to install only the core `ma` package (`torch`, `einops`).
+This creates `.venv` with Python 3.14 and the pinned versions in `uv.lock`. Drop `--extra experiments` to install only the core `ma` package (`torch`, `einops`).
 
 To use `ma` from another project: `pip install git+https://github.com/cjyaras/monarch-attention`.
 

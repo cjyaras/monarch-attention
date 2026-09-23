@@ -2,6 +2,7 @@ from enum import StrEnum
 
 from transformers.models.vit.configuration_vit import ViTConfig
 
+from experiments.common.attention import ATTN_IMPLEMENTATION
 from ma.monarch_attention import PadType
 
 
@@ -41,6 +42,8 @@ class CustomViTConfig(ViTConfig):
 
         # Low-rank attention
         self.rank = rank
+
+        self._attn_implementation = ATTN_IMPLEMENTATION
 
 
 def get_config() -> CustomViTConfig:

@@ -22,3 +22,16 @@ def move(obj: T, device) -> T:
 
 def get_device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+class ReadyPipelineMixin:
+    """For `evaluate` evaluators that are always passed a ready-made pipeline.
+
+    `evaluate`'s own `prepare_pipeline` checks `transformers.TFPreTrainedModel`,
+    which transformers 5 removed.
+    """
+
+    def prepare_pipeline(self, model_or_pipeline, *args, **kwargs):
+        if model_or_pipeline.task != self.task:
+            raise ValueError(f"Pipeline task {model_or_pipeline.task} != {self.task}")
+        return model_or_pipeline

@@ -3,13 +3,14 @@ from typing import Dict, Optional
 from evaluate import ImageClassificationEvaluator
 
 from experiments.common.logging import Logger
+from experiments.common.utils import ReadyPipelineMixin
 from experiments.vit.config import CustomViTConfig
 from experiments.vit.data import get_dataset
 from experiments.vit.metric import TopKAccuracy
 from experiments.vit.pipeline import CustomImageClassificationPipeline, get_pipeline
 
 
-class CustomImageClassificationEvaluator(ImageClassificationEvaluator):
+class CustomImageClassificationEvaluator(ReadyPipelineMixin, ImageClassificationEvaluator):
 
     def __init__(self, top_k: int):
         super().__init__(task="custom-image-classification", default_metric_name="")
@@ -50,7 +51,7 @@ class Evaluator:
             return (
                 sum(
                     [
-                        ftdm.flop_counts[f"vit.encoder.layer.{i}.attention"][
+                        ftdm.flop_counts[f"vit.layers.{i}.attention"][
                             "bmm.default"
                         ]
                         for i in range(pipe.model.config.num_hidden_layers)

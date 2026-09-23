@@ -2,6 +2,7 @@ from enum import StrEnum
 
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
+from experiments.common.attention import ATTN_IMPLEMENTATION
 from ma.monarch_attention import PadType
 from experiments.roberta.data import MAX_LENGTH
 
@@ -44,8 +45,7 @@ class CustomRobertaConfig(RobertaConfig):
         # Low-rank attention
         self.rank = rank
 
-        # Set _attn_implementation to eager to override attention_mask logic in RobertaModel
-        self._attn_implementation = "eager"
+        self._attn_implementation = ATTN_IMPLEMENTATION
 
 
 def get_config() -> CustomRobertaConfig:

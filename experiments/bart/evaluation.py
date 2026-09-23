@@ -3,12 +3,13 @@ from typing import Dict
 from evaluate import SummarizationEvaluator
 
 from experiments.common.logging import Logger
+from experiments.common.utils import ReadyPipelineMixin
 from experiments.bart.config import CustomBartConfig
 from experiments.bart.data import get_dataset
 from experiments.bart.pipeline import get_pipeline, CustomSummarizationPipeline
 
 
-class CustomSummarizationEvaluator(SummarizationEvaluator):
+class CustomSummarizationEvaluator(ReadyPipelineMixin, SummarizationEvaluator):
 
     def __init__(self, max_length):
         super().__init__(task="custom-summarization")

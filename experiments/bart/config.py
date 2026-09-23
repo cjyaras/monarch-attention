@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union
 
 from transformers.models.bart.configuration_bart import BartConfig
 
+from experiments.common.attention import ATTN_IMPLEMENTATION
 from ma.monarch_attention import PadType
 
 
@@ -68,6 +69,8 @@ class CustomBartConfig(BartConfig):
         self.conv_kernel_size = conv_kernel_size
 
         # Cosformer: none
+
+        self._attn_implementation = ATTN_IMPLEMENTATION
 
 
 def get_config() -> CustomBartConfig:

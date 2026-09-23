@@ -16,10 +16,10 @@ def _register_qk_hook(
     model: CustomViTForImageClassification,
     all_layer_intermediates: List[Dict[str, List[Tensor]]],
 ):
-    layers = model.vit.encoder.layer
+    layers = model.vit.layers
 
     for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.attention.attn_module  # type: ignore
+        attn_layer = layers[layer_idx].attention.attn_module  # type: ignore
 
         def qk_hook(_layer_idx):
             def hook(module, input, output):

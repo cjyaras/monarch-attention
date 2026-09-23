@@ -1,10 +1,13 @@
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Tuple
 
 import torch
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
     ViTModel,
-    ViTSelfAttention,
+)
+from transformers.conversion_mapping import (
+    get_checkpoint_conversion_mapping,
+    register_checkpoint_conversion_mapping,
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
@@ -57,50 +60,13 @@ def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tupl
             raise ValueError(f"Invalid attention type: {attention_type}")
 
 
-class CustomViTSelfAttention(ViTSelfAttention):
-
-    def __init__(self, layer_num: int, config: CustomViTConfig):
-        super().__init__(config)
-
-        if isinstance(config.attention_type, Dict):
-            attention_type = config.attention_type[layer_num]
-            module = ATTENTION_TYPE_TO_MODULE[attention_type]
-            self.attn_module = module(*prepare_args(attention_type, config))
-        else:
-            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
-            self.attn_module = module(*prepare_args(config.attention_type, config))
-
-    def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
-        new_x_shape = x.size()[:-1] + (
-            self.num_attention_heads,
-            self.attention_head_size,
-        )
-        x = x.view(new_x_shape)
-        return x.permute(0, 2, 1, 3)
-
-    def forward(
-        self,
-        hidden_states: torch.FloatTensor,
-        head_mask: Optional[torch.Tensor] = None,
-        output_attentions: bool = False,
-    ) -> Union[Tuple[torch.Tensor, torch.Tensor], Tuple[torch.Tensor]]:
-
-        assert head_mask is None
-        assert not output_attentions
-
-        mixed_query_layer = self.query(hidden_states)
-
-        key_layer = self.transpose_for_scores(self.key(hidden_states))
-        value_layer = self.transpose_for_scores(self.value(hidden_states))
-        query_layer = self.transpose_for_scores(mixed_query_layer)
-
-        context_layer = self.attn_module(query_layer, key_layer, value_layer)
-
-        context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
-        new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
-        context_layer = context_layer.view(new_context_layer_shape)
-
-        return context_layer, None  # type: ignore
+def get_attn_module(layer_num: int, config: CustomViTConfig) -> torch.nn.Module:
+    if isinstance(config.attention_type, Dict):
+        attention_type = config.attention_type[layer_num]
+    else:
+        attention_type = config.attention_type
+    module = ATTENTION_TYPE_TO_MODULE[attention_type]
+    return module(*prepare_args(attention_type, config))
 
 
 class CustomViTModel(ViTModel):
@@ -112,9 +78,15 @@ class CustomViTModel(ViTModel):
         use_mask_token: bool = False,
     ):
         super().__init__(config, add_pooling_layer, use_mask_token)
-        for layer_num, layer in enumerate(self.encoder.layer):
-            layer.attention.attention = CustomViTSelfAttention(layer_num, config)  # type: ignore
+        for layer_num, layer in enumerate(self.layers):
+            layer.attention.attn_module = get_attn_module(layer_num, config)  # type: ignore
         self.post_init()
+
+
+# Transformers only renames old-format checkpoint weights for its own classes.
+register_checkpoint_conversion_mapping(
+    "CustomViTModel", get_checkpoint_conversion_mapping("ViTModel")
+)
 
 
 class CustomViTForImageClassification(ViTForImageClassification):

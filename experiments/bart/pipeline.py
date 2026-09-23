@@ -1,12 +1,6 @@
-from typing import Optional, Union
-
-from transformers.modelcard import ModelCard
 from transformers.pipelines import PIPELINE_REGISTRY, pipeline
-from transformers.pipelines.text2text_generation import (
-    SummarizationPipeline,
-)
-from transformers.tokenization_utils import PreTrainedTokenizer
 
+from experiments.common.summarization_pipeline import SummarizationPipeline
 from experiments.common.utils import get_device
 
 from experiments.bart.config import CustomBartConfig
@@ -47,7 +41,7 @@ def get_pipeline(
         device=get_device(),
         tokenizer=get_processor(max_length),
         batch_size=batch_size,
-        torch_dtype="bfloat16",
+        dtype="bfloat16",
         pipeline_class=CustomSummarizationPipeline,
     )
     assert isinstance(pipe, CustomSummarizationPipeline)

@@ -30,6 +30,7 @@ import nltk  # Here to have a nice missing dependency error message early on
 import numpy as np
 from datasets import load_dataset
 from filelock import FileLock
+from huggingface_hub import is_offline_mode
 
 import transformers
 from transformers import (
@@ -47,7 +48,7 @@ from transformers import (
     set_seed,
 )
 from transformers.trainer_utils import get_last_checkpoint
-from transformers.utils import check_min_version, is_offline_mode, send_example_telemetry
+from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 
 from experiments.bart.config import CustomBartConfig
@@ -57,21 +58,21 @@ AutoConfig.register("custom_bart", CustomBartConfig)
 AutoModelForSeq2SeqLM.register(CustomBartConfig, CustomBartForConditionalGeneration)
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
-check_min_version("4.51.0")
+check_min_version("5.0.0")
 
 require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/summarization/requirements.txt")
 
 logger = logging.getLogger(__name__)
 
 try:
-    nltk.data.find("tokenizers/punkt")
+    nltk.data.find("tokenizers/punkt_tab")
 except (LookupError, OSError):
     if is_offline_mode():
         raise LookupError(
             "Offline mode: run this script without TRANSFORMERS_OFFLINE first to download nltk data files"
         )
     with FileLock(".lock") as lock:
-        nltk.download("punkt", quiet=True)
+        nltk.download("punkt_tab", quiet=True)
 
 # A list of all multilingual tokenizer which require lang attribute.
 MULTILINGUAL_TOKENIZERS = [MBartTokenizer, MBartTokenizerFast, MBart50Tokenizer, MBart50TokenizerFast]
@@ -341,10 +342,6 @@ def main():
         model_args, data_args, training_args = parser.parse_json_file(json_file=os.path.abspath(sys.argv[1]))
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-
-    # Sending telemetry. Tracking the example usage helps us better allocate resources to maintain them. The
-    # information sent is the one passed as arguments along with your Python/PyTorch versions.
-    send_example_telemetry("run_summarization", model_args, data_args)
 
     # Setup logging
     logging.basicConfig(
