@@ -7,7 +7,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from flash_attention import flash_attention
-from flash_monarch_attention import flash_monarch_attention
+from ma.ma_triton import monarch_attention_triton
 from fused_flash_monarch_attention import fused_flash_monarch_attention
 from triton.testing import do_bench
 
@@ -92,7 +92,7 @@ def run_and_plot_attention_sweeps(num_heads, seq_len, d, T):
 
         try:
             t1 = benchmark(
-                run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad
+                run_mode, monarch_attention_triton, q, k, v, attn_mask, T, b, pre_pad
             )
         except Exception:
             t1 = float("nan")
@@ -237,7 +237,7 @@ def sweep_batch(num_heads, seq_len, d, T):
         try:
             t1 = benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b, T)
         except Exception as e:
-            print(f"flash_monarch_attention failed: {e}")
+            print(f"fused_flash_monarch_attention failed: {e}")
             t1 = float("nan")
 
         try:
@@ -324,10 +324,10 @@ def sweep_seq_len(batch, num_heads, d, T):
 
         try:
             t1 = benchmark(
-                run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad
+                run_mode, monarch_attention_triton, q, k, v, attn_mask, T, b, pre_pad
             )
         except Exception as e:
-            print(f"flash_monarch_attention failed: {e}")
+            print(f"monarch_attention_triton failed: {e}")
             t1 = float("nan")
 
         try:
@@ -436,10 +436,10 @@ if __name__ == "__main__":
 
         try:
             benchmark(
-                run_mode, flash_monarch_attention, q, k, v, attn_mask, T, b, pre_pad
+                run_mode, monarch_attention_triton, q, k, v, attn_mask, T, b, pre_pad
             )
         except Exception as e:
-            print(f"flash_monarch_attention failed: {e}")
+            print(f"monarch_attention_triton failed: {e}")
 
         # try:
         #     benchmark(run_mode, fused_flash_monarch_attention, q, k, v, b, T)

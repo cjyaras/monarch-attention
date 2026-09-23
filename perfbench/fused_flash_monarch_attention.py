@@ -160,9 +160,8 @@ def fused_flash_monarch_attention(
 
 
 def test():
-    from flash_monarch_attention import flash_monarch_attention
+    from ma.ma_torch import monarch_attention_torch
 
-    # torch.cuda.manual_seed(0)
     torch.manual_seed(0)
 
     q = torch.randn(1, 1, 256, 64, dtype=torch.float16).cuda()
@@ -170,11 +169,9 @@ def test():
     v = torch.randn(1, 1, 256, 64, dtype=torch.float16).cuda()
 
     o1 = fused_flash_monarch_attention(q, k, v, 16, 1)
-    o2 = flash_monarch_attention(q, k, v, None, 1, 16, True)
+    o2 = monarch_attention_torch(q, k, v, None, 1, 16, False)
 
-    print(o1[0, 0, :32, :32])
-    print()
-    print(o2[0, 0, :32, :32])
+    print(f"max abs diff vs ma.ma_torch: {(o1 - o2).abs().max().item():.2e}")
 
 
 if __name__ == "__main__":
