@@ -3,6 +3,7 @@ import os
 import matplotlib.pyplot as plt
 import torch
 
+from experiments.common.attention import AttentionType
 from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
@@ -13,7 +14,7 @@ from experiments.common.baselines import (
 from ma.monarch_attention import MonarchAttention, PadType
 from experiments.vit.config import get_config
 from experiments.vit.extract import extract_query_key
-from experiments.vit.model import AttentionType
+
 
 Tensor = torch.Tensor
 

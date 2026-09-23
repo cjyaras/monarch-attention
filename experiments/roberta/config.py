@@ -1,50 +1,12 @@
-from enum import StrEnum
-
 from transformers.models.roberta.configuration_roberta import RobertaConfig
 
-from experiments.common.attention import ATTN_IMPLEMENTATION
-from ma.monarch_attention import PadType
+from experiments.common.attention import AttentionConfig
 
 
-class AttentionType(StrEnum):
-    softmax = "softmax"
-    monarch_attention = "monarch-attention"
-    hybrid = "hybrid"
-    linformer = "linformer"
-    performer = "performer"
-    nystromformer = "nystromformer"
-    cosformer = "cosformer"
-    linear_attention = "linear-attention"
-
-
-class CustomRobertaConfig(RobertaConfig):
-    def __init__(
-        self,
-        attention_type: (
-            AttentionType | dict[int, AttentionType]
-        ) = AttentionType.softmax,
-        enable_flash_attention: bool = False,
-        num_steps: int | None = None,
-        rank: int | None = None,
-        block_size: int | None = None,
-        pad_type: PadType = PadType.pre,
-        **kwargs,
-    ):
+class CustomRobertaConfig(AttentionConfig, RobertaConfig):
+    # An explicit __init__ stops transformers from generating one that skips the mixin
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.attention_type = attention_type
-
-        # Softmax
-        self.enable_flash_attention = enable_flash_attention
-
-        # Monarch
-        self.num_steps = num_steps
-        self.block_size = block_size
-        self.pad_type = pad_type
-
-        # Low-rank attention
-        self.rank = rank
-
-        self._attn_implementation = ATTN_IMPLEMENTATION
 
 
 def get_config() -> CustomRobertaConfig:

@@ -1,71 +1,15 @@
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 
-from experiments.common.baselines import Cosformer, Linformer, Nystromformer, Performer, Softmax, LinearAttention
-from ma.monarch_attention import MonarchAttention
-from experiments.dit.config import AttentionType, EfficientAttnConfig
-
-ATTENTION_TYPE_TO_MODULE = {
-    AttentionType.softmax: Softmax,
-    AttentionType.monarch: MonarchAttention,
-    AttentionType.linformer: Linformer,
-    AttentionType.performer: Performer,
-    AttentionType.nystromformer: Nystromformer,
-    AttentionType.cosformer: Cosformer,
-    AttentionType.linear_attention: LinearAttention,
-}
-
-
-def prepare_args(config: EfficientAttnConfig, layer_num: Optional[int] = None):
-    if isinstance(config.attention_type, Dict):
-        assert layer_num is not None
-        attn_type = config.attention_type[layer_num]
-    else:
-        attn_type = config.attention_type
-
-    match attn_type:
-        case AttentionType.monarch:
-            return (
-                config.block_size,
-                config.num_steps,
-                config.pad_type,
-            )
-
-        case AttentionType.softmax:
-            return (config.enable_flash_attention,)
-        case AttentionType.linformer:
-            return (config.rank,)
-
-        case AttentionType.performer:
-            return (config.rank,)
-
-        case AttentionType.nystromformer:
-            return (config.rank, config.num_attention_heads,)
-
-        case AttentionType.cosformer:
-            return ()
-        
-        case AttentionType.linear_attention:
-            return ()
-
-        case _:
-            raise ValueError(
-                f"Invalid attention type: {config.attention_type}"
-            )
-
+from experiments.common.attention import get_attn_module
+from experiments.dit.config import EfficientAttnConfig
 
 class EfficientAttnProcessor(AttnProcessor2_0):
     def __init__(self, config: EfficientAttnConfig, layer_num: Optional[int] = None):
         super().__init__()
-        if isinstance(config.attention_type, Dict):
-            attention_type = config.attention_type[layer_num]
-            module = ATTENTION_TYPE_TO_MODULE[attention_type]
-        else:
-            module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
-
-        self.attn_module = module(*prepare_args(config, layer_num))
+        self.attn_module = get_attn_module(config, layer_num)
 
     def __call__(
         self,

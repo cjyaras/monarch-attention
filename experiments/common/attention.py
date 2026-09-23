@@ -1,4 +1,5 @@
-"""Route Hugging Face attention layers through this repo's attention modules.
+"""Attention types shared by the experiments, and the hook that routes Hugging Face
+attention layers through them.
 
 Models whose config sets ``_attn_implementation = ATTN_IMPLEMENTATION`` call
 ``custom_attention_forward`` in every attention layer. Layers that have an
@@ -6,9 +7,105 @@ Models whose config sets ``_attn_implementation = ATTN_IMPLEMENTATION`` call
 fall back to standard SDPA attention.
 """
 
+from enum import StrEnum
+
+import torch.nn as nn
 from transformers import AttentionInterface
 from transformers.integrations.sdpa_attention import sdpa_attention_forward
 from transformers.masking_utils import AttentionMaskInterface, sdpa_mask
+
+from experiments.common.baselines import (
+    Cosformer,
+    LinearAttention,
+    Linformer,
+    Nystromformer,
+    Performer,
+    Softmax,
+)
+from ma.monarch_attention import MonarchAttention, PadType
+
+
+class AttentionType(StrEnum):
+    softmax = "softmax"
+    monarch_attention = "monarch-attention"
+    monarch = "monarch-attention"  # alias, used by the DiT command-line scripts
+    linformer = "linformer"
+    performer = "performer"
+    nystromformer = "nystromformer"
+    cosformer = "cosformer"
+    linear_attention = "linear-attention"
+
+
+ATTENTION_TYPE_TO_MODULE = {
+    AttentionType.softmax: Softmax,
+    AttentionType.monarch_attention: MonarchAttention,
+    AttentionType.linformer: Linformer,
+    AttentionType.performer: Performer,
+    AttentionType.nystromformer: Nystromformer,
+    AttentionType.cosformer: Cosformer,
+    AttentionType.linear_attention: LinearAttention,
+}
+
+
+class AttentionConfig:
+    """Attention settings for the Hugging Face experiment configs (use as a mixin)."""
+
+    def __init__(
+        self,
+        attention_type: AttentionType | dict[int, AttentionType] = AttentionType.softmax,
+        enable_flash_attention: bool = False,
+        num_steps: int | None = None,
+        rank: int | None = None,
+        block_size: int | None = None,
+        pad_type: PadType = PadType.pre,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.attention_type = attention_type
+        self.enable_flash_attention = enable_flash_attention  # Softmax
+        self.num_steps = num_steps  # Monarch
+        self.block_size = block_size  # Monarch
+        self.pad_type = pad_type  # Monarch
+        self.rank = rank  # Low-rank attention
+        self._attn_implementation = ATTN_IMPLEMENTATION
+
+
+def get_attn_module(config, layer_num: int | None = None) -> nn.Module:
+    """Build the attention module for one layer from an experiment config."""
+    attention_type = config.attention_type
+    if isinstance(attention_type, dict):
+        attention_type = attention_type[layer_num]
+
+    match attention_type:
+        case AttentionType.softmax:
+            args = (config.enable_flash_attention,)
+        case AttentionType.monarch_attention:
+            args = (config.block_size, config.num_steps, config.pad_type)
+        case (
+            AttentionType.linformer
+            | AttentionType.performer
+            | AttentionType.nystromformer
+        ):
+            args = (config.rank,)
+        case AttentionType.cosformer | AttentionType.linear_attention:
+            args = ()
+        case _:
+            raise ValueError(f"Invalid attention type: {attention_type}")
+
+    return ATTENTION_TYPE_TO_MODULE[attention_type](*args)
+
+
+def get_mixed_type(
+    efficient_attn_layers,
+    efficient_type: AttentionType,
+    default_type: AttentionType = AttentionType.softmax,
+    num_layers: int = 12,
+) -> dict[int, AttentionType]:
+    return {
+        layer_num: efficient_type if layer_num in efficient_attn_layers else default_type
+        for layer_num in range(num_layers)
+    }
+
 
 ATTN_IMPLEMENTATION = "custom"
 

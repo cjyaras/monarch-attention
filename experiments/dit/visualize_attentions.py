@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
+from experiments.common.attention import AttentionType
 from experiments.common.baselines import Softmax, Nystromformer
 from experiments.dit.extract import extract_query_key
-from experiments.dit.config import AttentionType
 
 
 def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:

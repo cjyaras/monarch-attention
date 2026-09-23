@@ -1,56 +1,12 @@
-from typing import Tuple
-
 import torch
 import torch.nn as nn
 import torch_geometric.nn as gnn
 
-from experiments.common.baselines import (
-    Cosformer,
-    LinearAttention,
-    Linformer,
-    Nystromformer,
-    Performer,
-    Softmax,
-)
+from experiments.common.attention import get_attn_module
 from experiments.common.utils import get_device
-from experiments.gps.config import AttentionType, CustomGPSConfig
-from ma.monarch_attention import MonarchAttention
+from experiments.gps.config import CustomGPSConfig
 
 Tensor = torch.Tensor
-
-ATTENTION_TYPE_TO_MODULE = {
-    AttentionType.softmax: Softmax,
-    AttentionType.monarch_attention: MonarchAttention,
-    AttentionType.linformer: Linformer,
-    AttentionType.performer: Performer,
-    AttentionType.nystromformer: Nystromformer,
-    AttentionType.cosformer: Cosformer,
-    AttentionType.linear_attention: LinearAttention,
-}
-
-
-def prepare_args(attention_type: AttentionType, config: CustomGPSConfig) -> Tuple:
-
-    match attention_type:
-
-        case AttentionType.softmax:
-            return (config.enable_flash_attention,)
-
-        case AttentionType.monarch_attention:
-            return (config.block_size, config.num_steps, config.pad_type)
-
-        case (
-            AttentionType.linformer
-            | AttentionType.performer
-            | AttentionType.nystromformer
-        ):
-            return (config.rank,)
-
-        case AttentionType.cosformer | AttentionType.linear_attention:
-            return ()
-
-        case _:
-            raise ValueError(f"Invalid attention type: {attention_type}")
 
 
 class GPSAttention(nn.Module):
@@ -62,9 +18,7 @@ class GPSAttention(nn.Module):
         self.value = nn.Linear(config.hidden_dims, config.hidden_dims)
         self.output = nn.Linear(config.hidden_dims, config.hidden_dims)
 
-        module = ATTENTION_TYPE_TO_MODULE[config.attention_type]
-
-        self.attn_module = module(*prepare_args(config.attention_type, config))
+        self.attn_module = get_attn_module(config)
         self.hidden_dims = config.hidden_dims
         self.num_heads = config.num_heads
         self.head_dims = config.hidden_dims // config.num_heads

@@ -1,17 +1,7 @@
 from dataclasses import dataclass
-from enum import StrEnum
 
+from experiments.common.attention import AttentionType
 from ma.monarch_attention import PadType
-
-
-class AttentionType(StrEnum):
-    softmax = "softmax"
-    monarch_attention = "monarch-attention"
-    linformer = "linformer"
-    performer = "performer"
-    nystromformer = "nystromformer"
-    cosformer = "cosformer"
-    linear_attention = "linear-attention"
 
 
 @dataclass

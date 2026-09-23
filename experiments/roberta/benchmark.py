@@ -1,20 +1,13 @@
 import torch
 
-from experiments.roberta.config import AttentionType, PadType, get_config
+from experiments.common.attention import AttentionType, get_mixed_type
+from ma.monarch_attention import PadType
+from experiments.roberta.config import get_config
 from experiments.roberta.evaluation import Evaluator
 
 NUM_SAMPLES = 1024
 BATCH_SIZE = 8
 SAVE_DIR = "experiments/roberta/results"
-
-
-def get_mixed_type(efficient_attn_layers, efficient_type, default_type):
-    return {
-        layer_num: (
-            efficient_type if layer_num in efficient_attn_layers else default_type
-        )
-        for layer_num in range(12)
-    }
 
 
 @torch.no_grad()

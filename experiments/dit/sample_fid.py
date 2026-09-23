@@ -8,14 +8,14 @@ from math import ceil
 from tqdm import tqdm
 
 
-from experiments.dit.config import AttentionType
+
+from experiments.common.attention import AttentionType
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
 from experiments.common.utils import get_device
 
 device = get_device()
-
 
 
 def save_images_as_npz(output: ImagePipelineOutput, save_fname: str):

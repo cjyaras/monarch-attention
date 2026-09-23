@@ -2,7 +2,8 @@ import argparse
 import json
 import os
 
-from experiments.bart.config import AttentionType, get_config
+from experiments.common.attention import AttentionType, get_mixed_type
+from experiments.bart.config import get_config
 from experiments.bart.evaluation import Evaluator
 import torch
 
@@ -51,14 +52,6 @@ def main():
 
         efficient_attn_layers = range(12)
 
-        def get_mixed_type(efficient_type, default_type):
-            return {
-                layer_num: (
-                    efficient_type if layer_num in efficient_attn_layers else default_type
-                )
-                for layer_num in range(12)
-            }
-
         # Softmax
         config = get_config()
         config.attention_type = AttentionType.softmax
@@ -74,10 +67,10 @@ def main():
         # Nystromformer
         config = get_config()
         config.attention_type = get_mixed_type(
+            efficient_attn_layers,
             AttentionType.nystromformer, AttentionType.softmax
         )
         config.rank = nystrom_rank
-        config.conv_kernel_size = None
         print(config.attention_type)
         # res = evaluator.evaluate(config)
         file_name, res = evaluator.evaluate_and_save(config)
@@ -88,6 +81,7 @@ def main():
         # Monarch
         config = get_config()
         config.attention_type = get_mixed_type(
+            efficient_attn_layers,
             AttentionType.monarch_attention, AttentionType.softmax
         )
         config.num_steps = num_steps

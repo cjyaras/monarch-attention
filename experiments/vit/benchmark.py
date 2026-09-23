@@ -1,6 +1,8 @@
 import torch
 
-from experiments.vit.config import AttentionType, PadType, get_config
+from experiments.common.attention import AttentionType
+from ma.monarch_attention import PadType
+from experiments.vit.config import get_config
 from experiments.vit.evaluation import Evaluator
 
 NUM_SAMPLES = 1024

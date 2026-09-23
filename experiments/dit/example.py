@@ -1,6 +1,7 @@
 from typing import List, Dict
 
-from experiments.dit.config import AttentionType
+
+from experiments.common.attention import AttentionType
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 import torch

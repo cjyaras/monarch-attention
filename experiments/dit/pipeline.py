@@ -2,7 +2,8 @@ from typing import Optional, Dict, List, Union
 
 import torch
 
-from experiments.dit.config import AttentionType, get_config
+from experiments.common.attention import AttentionType
+from experiments.dit.config import get_config
 from experiments.dit.model import get_model
 from diffusers import DiTPipeline
 from diffusers.models import DiTTransformer2DModel

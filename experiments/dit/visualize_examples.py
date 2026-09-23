@@ -5,7 +5,8 @@ import os
 
 import numpy as np
 
-from experiments.dit.config import AttentionType
+
+from experiments.common.attention import AttentionType
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 

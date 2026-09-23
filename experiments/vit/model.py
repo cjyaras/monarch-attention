@@ -1,6 +1,4 @@
-from typing import Dict, Tuple
 
-import torch
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
     ViTModel,
@@ -11,63 +9,11 @@ from transformers.conversion_mapping import (
 )
 from transformers.utils.logging import ERROR, set_verbosity  # type: ignore
 
-from experiments.common.baselines import (
-    Cosformer,
-    LinearAttention,
-    Linformer,
-    Nystromformer,
-    Performer,
-    Softmax,
-)
+from experiments.common.attention import get_attn_module
 from experiments.common.utils import get_device
-from ma.monarch_attention import MonarchAttention
-from experiments.vit.config import AttentionType, CustomViTConfig
+from experiments.vit.config import CustomViTConfig
 
 set_verbosity(ERROR)
-
-ATTENTION_TYPE_TO_MODULE = {
-    AttentionType.softmax: Softmax,
-    AttentionType.monarch_attention: MonarchAttention,
-    AttentionType.linformer: Linformer,
-    AttentionType.performer: Performer,
-    AttentionType.nystromformer: Nystromformer,
-    AttentionType.cosformer: Cosformer,
-    AttentionType.linear_attention: LinearAttention,
-}
-
-
-def prepare_args(attention_type: AttentionType, config: CustomViTConfig) -> Tuple:
-
-    match attention_type:
-
-        case AttentionType.softmax:
-            return (config.enable_flash_attention,)
-
-        case AttentionType.monarch_attention:
-            return (config.block_size, config.num_steps, config.pad_type)
-
-        case (
-            AttentionType.linformer
-            | AttentionType.performer
-            | AttentionType.nystromformer
-        ):
-            return (config.rank,)
-
-        case AttentionType.cosformer | AttentionType.linear_attention:
-            return ()
-
-        case _:
-            raise ValueError(f"Invalid attention type: {attention_type}")
-
-
-def get_attn_module(layer_num: int, config: CustomViTConfig) -> torch.nn.Module:
-    if isinstance(config.attention_type, Dict):
-        attention_type = config.attention_type[layer_num]
-    else:
-        attention_type = config.attention_type
-    module = ATTENTION_TYPE_TO_MODULE[attention_type]
-    return module(*prepare_args(attention_type, config))
-
 
 class CustomViTModel(ViTModel):
 
@@ -79,7 +25,7 @@ class CustomViTModel(ViTModel):
     ):
         super().__init__(config, add_pooling_layer, use_mask_token)
         for layer_num, layer in enumerate(self.layers):
-            layer.attention.attn_module = get_attn_module(layer_num, config)  # type: ignore
+            layer.attention.attn_module = get_attn_module(config, layer_num)  # type: ignore
         self.post_init()
 
 

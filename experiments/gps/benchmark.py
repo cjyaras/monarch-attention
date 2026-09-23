@@ -1,6 +1,7 @@
 import torch
 
-from experiments.gps.config import AttentionType, get_config
+from experiments.common.attention import AttentionType
+from experiments.gps.config import get_config
 from experiments.gps.evaluation import Evaluator
 
 SAVE_DIR = "experiments/gps/results"

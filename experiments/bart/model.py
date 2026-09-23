@@ -1,8 +1,6 @@
 # Code based on https://github.com/huggingface/transformers/blob/main/src/transformers/models/bart/modeling_bart.py
-from typing import Dict, Tuple
 
 import torch
-import torch.nn as nn
 from transformers.models.bart.modeling_bart import (
     BartForConditionalGeneration,
     BartDecoder,
@@ -10,63 +8,9 @@ from transformers.models.bart.modeling_bart import (
     BartLearnedPositionalEmbedding,
 )
 
-from experiments.common.baselines import (
-    Cosformer,
-    LinearAttention,
-    Linformer,
-    Nystromformer,
-    Performer,
-    Softmax,
-)
+from experiments.common.attention import get_attn_module
 from experiments.common.utils import get_device
-from ma.monarch_attention import MonarchAttention
-from experiments.bart.config import AttentionType, CustomBartConfig
-
-
-ATTENTION_TYPE_TO_MODULE = {
-    AttentionType.softmax: Softmax,
-    AttentionType.monarch_attention: MonarchAttention,
-    AttentionType.linformer: Linformer,
-    AttentionType.performer: Performer,
-    AttentionType.nystromformer: Nystromformer,
-    AttentionType.cosformer: Cosformer,
-    AttentionType.linear_attention: LinearAttention,
-}
-
-
-def prepare_args(attention_type: AttentionType, config: CustomBartConfig) -> Tuple:
-
-    match attention_type:
-
-        case AttentionType.softmax:
-            return (config.enable_flash_attention,)
-
-        case AttentionType.monarch_attention:
-            return (config.block_size, config.num_steps, config.pad_type)
-
-        case (
-            AttentionType.linformer
-            | AttentionType.performer
-            | AttentionType.nystromformer
-        ):
-            return (config.rank,)
-
-        case AttentionType.cosformer | AttentionType.linear_attention:
-            return ()
-
-        case _:
-            raise ValueError(f"Invalid attention type: {attention_type}")
-
-
-
-
-def get_attn_module(layer_num: int, config: CustomBartConfig) -> nn.Module:
-    if isinstance(config.attention_type, Dict):
-        attention_type = config.attention_type[layer_num]
-    else:
-        attention_type = config.attention_type
-    module = ATTENTION_TYPE_TO_MODULE[attention_type]
-    return module(*prepare_args(attention_type, config))
+from experiments.bart.config import CustomBartConfig
 
 
 class CustomBartDecoder(BartDecoder):
@@ -86,10 +30,9 @@ class CustomBartModel(BartModel):
     ):
         super().__init__(config)
         for layer_num, layer in enumerate(self.encoder.layers):
-            layer.self_attn.attn_module = get_attn_module(layer_num, config)
+            layer.self_attn.attn_module = get_attn_module(config, layer_num)
         self.decoder = CustomBartDecoder(config)
         self.post_init()
-
 
 
 class CustomBartForConditionalGeneration(BartForConditionalGeneration):
@@ -140,7 +83,6 @@ class CustomBartForConditionalGeneration(BartForConditionalGeneration):
         for mn, m in self.named_modules():
             if hasattr(m, 'config'):
                 m.config.max_position_embeddings = new_max_position_embeddings
-
 
 
 def get_model(

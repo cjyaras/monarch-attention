@@ -2,7 +2,8 @@ from typing import Dict, List, Tuple
 
 import torch
 
-from experiments.dit.config import AttentionType
+
+from experiments.common.attention import AttentionType
 from experiments.dit.model import CustomDiTTransformer2DModel
 from experiments.dit.pipeline import get_pipeline
 

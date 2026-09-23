@@ -4,10 +4,9 @@ import torch
 
 import numpy as np
 
-from experiments.dit.config import AttentionType
+
+from experiments.common.attention import AttentionType
 from experiments.dit.pipeline import get_pipeline, CustomDiTPipeline
-
-
 
 
 def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:

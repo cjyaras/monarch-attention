@@ -1,17 +1,7 @@
-from enum import StrEnum
 from typing import Dict, Optional, Union
 
+from experiments.common.attention import AttentionType
 from ma.monarch_attention import PadType
-
-
-class AttentionType(StrEnum):
-    softmax = "softmax"
-    monarch = "monarch"
-    linformer = "linformer"
-    performer = "performer"
-    nystromformer = "nystromformer"
-    cosformer = "cosformer"
-    linear_attention = "linear-attention"
 
 
 class EfficientAttnConfig:
