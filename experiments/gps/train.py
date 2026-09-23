@@ -37,7 +37,7 @@ def main():
         accuracy = compute_accuracy(model, dataset)
         print(f"Step: {step:02d} | Loss: {loss.item():.4f} | Accuracy: {accuracy:.4f}")
 
-    torch.save(model.state_dict(), "experiments/gps/gps_model.pth")
+    torch.save(model.state_dict(), "experiments/gps/gps_model.pt")
 
 
 if __name__ == "__main__":

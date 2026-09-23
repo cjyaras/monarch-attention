@@ -36,4 +36,3 @@ uv run python -m experiments.vit.benchmark
 ```
 
 See the READMEs in [`experiments/`](experiments) for the other benchmarks.
-
