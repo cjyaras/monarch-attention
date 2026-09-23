@@ -1,35 +1,13 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 
+from experiments.common.utils import batches, capture_attention_inputs, stack_captured
 from experiments.vit.config import CustomViTConfig
-from experiments.vit.data import get_dataset
-from experiments.vit.evaluation import CustomImageClassificationEvaluator
-from experiments.vit.metric import TopKAccuracy
-from experiments.vit.model import CustomViTForImageClassification
-from experiments.vit.pipeline import get_pipeline
+from experiments.vit.evaluation import Evaluator
+from experiments.vit.model import get_model
 
 Tensor = torch.Tensor
-
-
-def _register_qk_hook(
-    model: CustomViTForImageClassification,
-    all_layer_intermediates: List[Dict[str, List[Tensor]]],
-):
-    layers = model.vit.layers
-
-    for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.attn_module  # type: ignore
-
-        def qk_hook(_layer_idx):
-            def hook(module, input, output):
-                query, key, _ = input
-                all_layer_intermediates[_layer_idx]["query"].append(query)
-                all_layer_intermediates[_layer_idx]["key"].append(key)
-
-            return hook
-
-        attn_layer.register_forward_hook(qk_hook(layer_idx))  # type: ignore
 
 
 @torch.no_grad()
@@ -39,37 +17,12 @@ def extract_query_key(
     batch_size: int = 1,
     split: str = "validation",
 ) -> Tuple[Tensor, Tensor]:
+    evaluator = Evaluator(num_samples, top_k=1, batch_size=batch_size, save_dir="", split=split)
+    model = get_model(config)
+    attn_modules = [layer.attention.attn_module for layer in model.vit.layers]
 
-    dataset = get_dataset(num_samples=num_samples, split=split)
-    evaluator = CustomImageClassificationEvaluator(top_k=1)
-    metric = TopKAccuracy()
+    with capture_attention_inputs(attn_modules) as records:
+        for examples in batches(evaluator.dataset, batch_size):
+            evaluator.predict(model, examples)
 
-    pipe = get_pipeline(config, batch_size=batch_size)
-
-    all_layer_intermediates = [
-        {"query": [], "key": []} for _ in range(config.num_hidden_layers)
-    ]
-    _register_qk_hook(pipe.model, all_layer_intermediates)
-
-    evaluator.compute(
-        model_or_pipeline=pipe,
-        data=dataset,
-        metric=metric,
-        label_mapping=pipe.model.config.label2id,  # type: ignore
-    )
-
-    query = torch.stack(
-        [
-            torch.cat(layer_intermediates["query"])
-            for layer_intermediates in all_layer_intermediates
-        ]
-    ).transpose(1, 0)
-
-    key = torch.stack(
-        [
-            torch.cat(layer_intermediates["key"])
-            for layer_intermediates in all_layer_intermediates
-        ]
-    ).transpose(1, 0)
-
-    return query, key
+    return stack_captured(records, "query"), stack_captured(records, "key")

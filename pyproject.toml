@@ -32,7 +32,7 @@ experiments = [
     "transformers>=5",
     "diffusers",
     "datasets",
-    "evaluate[evaluator]",  # evaluator extra pulls in scipy
+    "evaluate",
     "nltk",
     "rouge_score",
     "accelerate",

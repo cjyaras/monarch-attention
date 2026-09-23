@@ -1,79 +1,58 @@
 from typing import Dict, Optional
 
-from evaluate import ImageClassificationEvaluator
+import torch
+from transformers.image_utils import load_image
 
 from experiments.common.logging import Logger
-from experiments.common.utils import ReadyPipelineMixin
+from experiments.common.utils import attention_bmm_flops, batches
 from experiments.vit.config import CustomViTConfig
 from experiments.vit.data import get_dataset
-from experiments.vit.metric import TopKAccuracy
-from experiments.vit.pipeline import CustomImageClassificationPipeline, get_pipeline
-
-
-class CustomImageClassificationEvaluator(ReadyPipelineMixin, ImageClassificationEvaluator):
-
-    def __init__(self, top_k: int):
-        super().__init__(task="custom-image-classification", default_metric_name="")
-        self.top_k = top_k
-        self.PIPELINE_KWARGS["top_k"] = top_k
-
-    def predictions_processor(self, predictions, label_mapping):
-        pred_label = [[x["label"] for x in pred] for pred in predictions]
-        pred_label = [
-            [label_mapping[x] for x in pred] if label_mapping is not None else pred
-            for pred in pred_label
-        ]
-
-        return {"predictions": pred_label}
+from experiments.vit.model import CustomViTForImageClassification, get_model
+from experiments.vit.processor import get_processor
 
 
 class Evaluator:
 
     def __init__(
-        self, num_samples: Optional[int], top_k: int, batch_size: int, save_dir: str
+        self,
+        num_samples: Optional[int],
+        top_k: int,
+        batch_size: int,
+        save_dir: str,
+        split: str = "validation",
     ):
+        self.top_k = top_k
         self.batch_size = batch_size
-        self.dataset = get_dataset(num_samples=num_samples)
-        self.metric = TopKAccuracy()
-        self.evaluator = CustomImageClassificationEvaluator(top_k=top_k)
+        self.dataset = get_dataset(num_samples=num_samples, split=split)
+        self.processor = get_processor()
         self.logger = Logger(save_dir)
 
-    def benchmark_flops(self, pipe: CustomImageClassificationPipeline):
-        from torchtnt.utils.flops import FlopTensorDispatchMode
-
-        with FlopTensorDispatchMode(pipe.model) as ftdm:
-            self.evaluator.compute(
-                model_or_pipeline=pipe,
-                data=self.dataset.take(self.batch_size),
-                metric=self.metric,
-                label_mapping=pipe.model.config.label2id,  # type: ignore
-            )
-            return (
-                sum(
-                    [
-                        ftdm.flop_counts[f"vit.layers.{i}.attention"][
-                            "bmm.default"
-                        ]
-                        for i in range(pipe.model.config.num_hidden_layers)
-                    ]
-                )
-                // self.batch_size
-            )
+    @torch.no_grad()
+    def predict(self, model: CustomViTForImageClassification, examples) -> torch.Tensor:
+        """Top-k predicted class ids for each image."""
+        images = [load_image(image) for image in examples["image"]]
+        inputs = self.processor(images=images, return_tensors="pt").to(model.device)
+        return model(**inputs).logits.topk(self.top_k).indices.cpu()
 
     def evaluate(self, config: CustomViTConfig) -> Dict[str, float]:
-        pipe = get_pipeline(config, batch_size=self.batch_size)
-
-        # Benchmark FLOPs (and warmup for compilation)
-        flop_count = self.benchmark_flops(pipe)
-        result = self.evaluator.compute(
-            model_or_pipeline=pipe,
-            data=self.dataset,
-            metric=self.metric,
-            label_mapping=pipe.model.config.label2id,  # type: ignore
+        model = get_model(config)
+        flops = attention_bmm_flops(
+            model,
+            [f"vit.layers.{i}.attention" for i in range(config.num_hidden_layers)],
+            lambda: self.predict(model, self.dataset[: self.batch_size]),
         )
-        assert isinstance(result, Dict)
-        result["total_attention_bmm_flops"] = flop_count
-        return result
+
+        correct = []
+        for examples in batches(self.dataset, self.batch_size):
+            predictions = self.predict(model, examples)
+            labels = torch.tensor(examples["label"])
+            correct.append((predictions == labels[:, None]).any(dim=-1))
+        accuracy = 100 * torch.cat(correct).double().mean().item()
+
+        return {
+            f"top-{self.top_k} accuracy": accuracy,
+            "total_attention_bmm_flops": flops // self.batch_size,
+        }
 
     def evaluate_and_save(self, config: CustomViTConfig) -> str:
         result = self.evaluate(config)

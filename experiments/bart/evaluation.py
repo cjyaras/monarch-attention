@@ -1,19 +1,15 @@
+import copy
 from typing import Dict
 
-from evaluate import SummarizationEvaluator
+import evaluate
+import torch
 
 from experiments.common.logging import Logger
-from experiments.common.utils import ReadyPipelineMixin
+from experiments.common.utils import attention_bmm_flops, batches
 from experiments.bart.config import CustomBartConfig
 from experiments.bart.data import get_dataset
-from experiments.bart.pipeline import get_pipeline, CustomSummarizationPipeline
-
-
-class CustomSummarizationEvaluator(ReadyPipelineMixin, SummarizationEvaluator):
-
-    def __init__(self, max_length):
-        super().__init__(task="custom-summarization")
-        self.PIPELINE_KWARGS['max_new_tokens'] = 512
+from experiments.bart.model import CustomBartForConditionalGeneration, get_model
+from experiments.bart.processor import get_processor
 
 
 class Evaluator:
@@ -25,53 +21,45 @@ class Evaluator:
         save_dir: str,
         max_length: int,
         model_checkpoint_path: str = "experiments/bart/finetuned/output/",
+        max_new_tokens: int = 512,
     ):
         self.batch_size = batch_size
         self.dataset = get_dataset(num_samples=num_samples)
-        self.evaluator = CustomSummarizationEvaluator(max_length)
+        self.tokenizer = get_processor(max_length)
+        self.metric = evaluate.load("rouge")
         self.logger = Logger(save_dir)
-        self.max_length = max_length
         self.model_checkpoint_path = model_checkpoint_path
+        self.max_new_tokens = max_new_tokens
 
-    def benchmark_flops(self, pipe: CustomSummarizationPipeline):
-        from torchtnt.utils.flops import FlopTensorDispatchMode
+    @torch.no_grad()
+    def summarize(self, model: CustomBartForConditionalGeneration, texts: list[str]) -> list[str]:
+        # Same settings the Hugging Face summarization pipeline used: the model's
+        # generation config, with pipeline defaults for anything it leaves unset
+        generation_config = copy.deepcopy(model.generation_config)
+        generation_config.update(max_new_tokens=256, num_beams=4, defaults_only=True)
+        generation_config.update(max_new_tokens=self.max_new_tokens)
 
-        with FlopTensorDispatchMode(pipe.model.model.encoder.layers[0].self_attn) as ftdm:
-            self.evaluator.compute(
-                model_or_pipeline=pipe,
-                data=self.dataset.select(range(1)),
-                metric="rouge", 
-                input_column="chapter",
-                label_column="summary_text",
-            )
-            flops = ftdm.flop_counts[""]["bmm.default"]
-            return flops
+        inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
+        output_ids = model.generate(**inputs.to(model.device), generation_config=generation_config)
+        return self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
-    def evaluate(
-        self,
-        config: CustomBartConfig,
-    ) -> Dict[str, float]:
-        pipe = get_pipeline(
-            config,
-            batch_size=self.batch_size,
-            max_length=self.max_length,
-            model_checkpoint_path=self.model_checkpoint_path,
+    def evaluate(self, config: CustomBartConfig) -> Dict[str, float]:
+        model = get_model(config, model_checkpoint_path=self.model_checkpoint_path)
+        flops = attention_bmm_flops(
+            model,
+            ["model.encoder.layers.0.self_attn"],
+            lambda: self.summarize(model, self.dataset[:1]["chapter"]),
         )
 
-        # Benchmark FLOPs (and warmup for compilation)
-        flop_count = self.benchmark_flops(pipe)
-        result = self.evaluator.compute(
-            model_or_pipeline=pipe,
-            data=self.dataset,#.take(self.batch_size),
-            metric="rouge",  
-            input_column="chapter",
-            label_column="summary_text",
+        predictions = []
+        for examples in batches(self.dataset, self.batch_size):
+            predictions += self.summarize(model, examples["chapter"])
+        result = self.metric.compute(
+            predictions=predictions, references=self.dataset["summary_text"]
         )
-
-        assert isinstance(result, Dict)
-        result["total_attention_bmm_flops"] = flop_count
+        assert result is not None
+        result["total_attention_bmm_flops"] = flops
         return result
-
 
     def evaluate_and_save(self, config: CustomBartConfig):
         result = self.evaluate(config)

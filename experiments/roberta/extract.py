@@ -1,37 +1,13 @@
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import torch
 
+from experiments.common.utils import capture_attention_inputs, stack_captured
 from experiments.roberta.config import CustomRobertaConfig
-from experiments.roberta.data import get_dataset
-from experiments.roberta.evaluation import CustomQuestionAnsweringEvaluator
-from experiments.roberta.model import CustomRobertaForQuestionAnswering
-from experiments.roberta.pipeline import get_pipeline
+from experiments.roberta.evaluation import Evaluator
+from experiments.roberta.model import get_model
 
 Tensor = torch.Tensor
-
-
-def _register_qk_hook(
-    model: CustomRobertaForQuestionAnswering,
-    all_layer_intermediates: List[Dict[str, List[Tensor]]],
-):
-    layers = model.roberta.encoder.layer
-
-    for layer_idx in range(len(layers)):
-        attn_layer = layers[layer_idx].attention.self.attn_module  # type: ignore
-
-        def qk_hook(_layer_idx):
-            def hook(module, input, output):
-                query, key, _, attention_mask = input
-                all_layer_intermediates[_layer_idx]["query"].append(query)
-                all_layer_intermediates[_layer_idx]["key"].append(key)
-                all_layer_intermediates[_layer_idx]["attention_mask"].append(
-                    attention_mask
-                )
-
-            return hook
-
-        attn_layer.register_forward_hook(qk_hook(layer_idx))  # type: ignore
 
 
 @torch.no_grad()
@@ -41,39 +17,13 @@ def extract_query_key_mask(
     batch_size: int = 1,
     split: str = "validation",
 ) -> Tuple[Tensor, Tensor, Tensor]:
+    evaluator = Evaluator(num_samples, batch_size=batch_size, save_dir="", split=split)
+    model = get_model(config)
+    attn_modules = [layer.attention.self.attn_module for layer in model.roberta.encoder.layer]
 
-    dataset = get_dataset(num_samples=num_samples, split=split)
-    evaluator = CustomQuestionAnsweringEvaluator()
+    with capture_attention_inputs(attn_modules) as records:
+        evaluator.predict(model, evaluator.dataset[:])
 
-    pipe = get_pipeline(config, batch_size=batch_size)
-
-    all_layer_intermediates = [
-        {"query": [], "key": [], "attention_mask": []}
-        for _ in range(config.num_hidden_layers)
-    ]
-    _register_qk_hook(pipe.model, all_layer_intermediates)
-
-    evaluator.compute(
-        model_or_pipeline=pipe,
-        data=dataset,
-        metric="squad_v2",
-        squad_v2_format=True,
-    )
-
-    query = torch.stack(
-        [
-            torch.cat(layer_intermediates["query"])
-            for layer_intermediates in all_layer_intermediates
-        ]
-    ).transpose(1, 0)
-
-    key = torch.stack(
-        [
-            torch.cat(layer_intermediates["key"])
-            for layer_intermediates in all_layer_intermediates
-        ]
-    ).transpose(1, 0)
-
-    attention_mask = torch.cat(all_layer_intermediates[0]["attention_mask"])
-
-    return query, key, attention_mask
+    # The padding mask is the same in every layer
+    attention_mask = torch.cat(records[0]["attention_mask"])
+    return stack_captured(records, "query"), stack_captured(records, "key"), attention_mask

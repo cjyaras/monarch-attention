@@ -46,7 +46,7 @@ class ScriptArguments:
     max_eval_samples: Optional[int] = None
     num_beams: int = field(default=1, metadata={"help": "Beams for generation during evaluation."})
     ignore_pad_token_for_loss: bool = True
-    attention_type: str = field(default="softmax", metadata={"help": "See experiments/bart/config.py:AttentionType."})
+    attention_type: str = field(default="softmax", metadata={"help": "See experiments/common/attention.py:AttentionType."})
     num_steps: Optional[int] = field(default=None, metadata={"help": "Monarch attention steps."})
     block_size: Optional[int] = field(default=None, metadata={"help": "Monarch attention block size."})
     attention_rank: Optional[int] = field(default=None, metadata={"help": "Rank for low-rank baselines."})
