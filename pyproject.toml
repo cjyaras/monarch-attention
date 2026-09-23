@@ -3,27 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["monarch-attention"]
+packages = ["ma"]
 
 [project]
 name = "monarch-attention"
 version = "0.0.1"
 dependencies = [
     "torch>=2.6.0",
-    "triton==3.3.0",
-    "opt_einsum",
     "einops",
-    "torchvision",
-    "torch_geometric",
-    "torchtnt",
-    "transformers",
-    "diffusers",
-    "evaluate",
-    "scikit-learn",
-    "datasets",
-    "matplotlib",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
   {name = "Can Yaras", email = "cjyaras@gmail.com"},
 ]
@@ -32,3 +21,28 @@ readme = "README.md"
 license = {file = "LICENSE"}
 keywords = []
 
+[project.optional-dependencies]
+experiments = [
+    "numpy",
+    "tqdm",
+    "matplotlib",
+    "torchvision",
+    "torch_geometric",
+    "torchtnt",
+    "transformers>=4.51,<4.57",
+    "diffusers",
+    "datasets",
+    "evaluate",
+    "nltk",
+    "rouge_score",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+# Triton compiles a C launcher at runtime and needs Python headers, which
+# system Pythons often lack; uv-managed Pythons always ship them.
+python-preference = "only-managed"
