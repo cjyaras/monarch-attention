@@ -54,3 +54,6 @@ ignore = [
     "E741",  # single-letter index names like `l` mirror the math
     "E731",  # `grid = lambda meta: ...` is the Triton idiom
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

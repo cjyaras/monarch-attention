@@ -27,6 +27,12 @@ def _al_cl_kernel(
     stride_k_m,
     stride_k_b,
     stride_k_d,
+    v_ptr,
+    stride_v_e,
+    stride_v_h,
+    stride_v_m,
+    stride_v_b,
+    stride_v_d,
     cr_ptr,
     stride_cr_e,
     stride_cr_h,
@@ -38,6 +44,12 @@ def _al_cl_kernel(
     stride_al_m,
     stride_al_b,
     stride_al_d,
+    y_ptr,
+    stride_y_e,
+    stride_y_h,
+    stride_y_m,
+    stride_y_b,
+    stride_y_d,
     cl_ptr,
     stride_cl_e,
     stride_cl_h,
@@ -59,6 +71,7 @@ def _al_cl_kernel(
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
     EPS: tl.constexpr,
+    COMPUTE_Y: tl.constexpr,
 ):
     idx_ehm = tl.program_id(0)
     idx_eh = idx_ehm // M
@@ -73,7 +86,7 @@ def _al_cl_kernel(
     range_n = B * idx_m + range_b
 
     mask_b = range_b < B
-    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else (range_n < N))
+    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else range_n < N)
     k_mask_b = pad_mask_b
     mask_d = range_d < D
 
@@ -164,6 +177,36 @@ def _al_cl_kernel(
         al,
         mask=mask_b[:, None] & mask_d[None, :],
     )
+
+    if COMPUTE_Y:
+        # Load v
+        v_block_ptr = (
+            v_ptr
+            + stride_v_e * idx_e
+            + stride_v_h * idx_h
+            + stride_v_m * idx_m
+            + (stride_v_b * (range_b - pad_offset)[:, None] + stride_v_d * range_d[None, :])
+        )
+        v = tl.load(
+            v_block_ptr,
+            mask=k_mask_b[:, None] & mask_d[None, :],
+            other=0.0,
+        )
+
+        # Store y
+        y = tl.dot(r.to(v.dtype), v).to(ar.dtype)
+        y_block_ptr = (
+            y_ptr
+            + stride_y_e * idx_e
+            + stride_y_h * idx_h
+            + stride_y_m * idx_m
+            + (stride_y_b * range_b[:, None] + stride_y_d * range_d[None, :])
+        )
+        tl.store(
+            y_block_ptr,
+            y,
+            mask=mask_b[:, None] & mask_d[None, :],
+        )
 
 
 @triton.jit
@@ -310,200 +353,6 @@ def _ar_cr_kernel(
         ar_block_ptr,
         ar,
         mask=mask_m[:, None] & mask_d[None, :],
-    )
-
-
-@triton.jit
-def _al_y_cl_kernel(
-    ar_ptr,
-    stride_ar_e,
-    stride_ar_h,
-    stride_ar_m,
-    stride_ar_b,
-    stride_ar_d,
-    k_ptr,
-    stride_k_e,
-    stride_k_h,
-    stride_k_m,
-    stride_k_b,
-    stride_k_d,
-    v_ptr,
-    stride_v_e,
-    stride_v_h,
-    stride_v_m,
-    stride_v_b,
-    stride_v_d,
-    cr_ptr,
-    stride_cr_e,
-    stride_cr_h,
-    stride_cr_m,
-    stride_cr_b,
-    al_ptr,
-    stride_al_e,
-    stride_al_h,
-    stride_al_m,
-    stride_al_b,
-    stride_al_d,
-    y_ptr,
-    stride_y_e,
-    stride_y_h,
-    stride_y_m,
-    stride_y_b,
-    stride_y_d,
-    cl_ptr,
-    stride_cl_e,
-    stride_cl_h,
-    stride_cl_m,
-    stride_cl_b,
-    mask_ptr,
-    stride_mask_e,
-    stride_mask_m,
-    stride_mask_b,
-    H: int,
-    M: int,
-    B: int,
-    D: int,
-    N: int,
-    is_first_call: int,
-    sm_scale: float,
-    HAS_ATTN_MASK: tl.constexpr,
-    BLOCK_B: tl.constexpr,
-    BLOCK_D: tl.constexpr,
-    PRE_PAD: tl.constexpr,
-    EPS: tl.constexpr,
-):
-    idx_ehm = tl.program_id(0)
-    idx_eh = idx_ehm // M
-    idx_e = idx_eh // H
-    idx_h = idx_eh % H
-    idx_m = idx_ehm % M
-
-    pad_offset = M * B - N if PRE_PAD else 0
-
-    range_b = tl.arange(0, BLOCK_B)
-    range_d = tl.arange(0, BLOCK_D)
-    range_n = B * idx_m + range_b
-
-    mask_b = range_b < B
-    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else range_n < N)
-    k_mask_b = pad_mask_b
-    mask_d = range_d < D
-
-    if HAS_ATTN_MASK:
-        mask_block_ptr = (
-            mask_ptr
-            + stride_mask_e * idx_e
-            + stride_mask_m * idx_m
-            + stride_mask_b * (range_b - pad_offset)
-        )
-        valid_token_mask = tl.load(
-            mask_block_ptr,
-            mask=pad_mask_b,
-            other=0,
-        )
-        k_mask_b = pad_mask_b & valid_token_mask
-
-    # Load ar
-    ar_block_ptr = (
-        ar_ptr
-        + stride_ar_e * idx_e
-        + stride_ar_h * idx_h
-        + stride_ar_m * idx_m
-        + (
-            stride_ar_b * (range_b - (pad_offset if is_first_call else 0))[:, None]
-            + stride_ar_d * range_d[None, :]
-        )
-    )
-    ar = tl.load(
-        ar_block_ptr,
-        mask=(pad_mask_b if is_first_call else mask_b)[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Load k
-    k_block_ptr = (
-        k_ptr
-        + stride_k_e * idx_e
-        + stride_k_h * idx_h
-        + stride_k_m * idx_m
-        + (stride_k_b * (range_b - pad_offset)[:, None] + stride_k_d * range_d[None, :])
-    )
-    k = tl.load(
-        k_block_ptr,
-        mask=k_mask_b[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Load cr
-    cr_block_ptr = (
-        cr_ptr
-        + stride_cr_e * idx_e
-        + stride_cr_h * idx_h
-        + stride_cr_m * idx_m
-        + (stride_cr_b * range_b)
-    )
-    cr = tl.load(cr_block_ptr, mask=mask_b, other=1.0)
-
-    # Attention matrix
-    r = sm_scale * tl.dot(ar, tl.trans(k))
-    r = r / (cr[:, None] + EPS)
-    r = r + tl.where(k_mask_b[None, :], 0.0, float("-inf"))
-    r = tl.exp(r - tl.clamp(tl.max(r, axis=1, keep_dims=True), EPS, float("inf")))
-    r = r / (tl.sum(r, axis=1, keep_dims=True) + EPS)
-
-    # Store cl
-    cl = tl.sum(xlogx(r), axis=1)
-    cl_block_ptr = (
-        cl_ptr
-        + stride_cl_e * idx_e
-        + stride_cl_h * idx_h
-        + stride_cl_m * idx_m
-        + (stride_cl_b * range_b)
-    )
-    tl.store(cl_block_ptr, cl, mask=mask_b)
-
-    # Store al
-    al = (sm_scale * tl.dot(r.to(k.dtype), k)).to(ar.dtype)
-    al_block_ptr = (
-        al_ptr
-        + stride_al_e * idx_e
-        + stride_al_h * idx_h
-        + stride_al_m * idx_m
-        + (stride_al_b * range_b[:, None] + stride_al_d * range_d[None, :])
-    )
-    tl.store(
-        al_block_ptr,
-        al,
-        mask=mask_b[:, None] & mask_d[None, :],
-    )
-
-    # Load v
-    v_block_ptr = (
-        v_ptr
-        + stride_v_e * idx_e
-        + stride_v_h * idx_h
-        + stride_v_m * idx_m
-        + (stride_v_b * (range_b - pad_offset)[:, None] + stride_v_d * range_d[None, :])
-    )
-    v = tl.load(
-        v_block_ptr,
-        mask=k_mask_b[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Store y
-    y = tl.dot(r.to(v.dtype), v).to(ar.dtype)
-    y_block_ptr = (
-        y_ptr
-        + stride_y_e * idx_e
-        + stride_y_h * idx_h
-        + stride_y_m * idx_m
-        + (stride_y_b * range_b[:, None] + stride_y_d * range_d[None, :])
-    )
-    tl.store(
-        y_block_ptr,
-        y,
-        mask=mask_b[:, None] & mask_d[None, :],
     )
 
 
@@ -672,6 +521,9 @@ def monarch_attention_triton(
     ar_strides = (ar.stride(0), ar.stride(1), ar.stride(2), ar.stride(3), ar.stride(4))
     al_strides = (al.stride(0), al.stride(1), al.stride(2), al.stride(3), al.stride(4))
 
+    y = torch.empty_like(al)
+    y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
+
     cr = torch.ones(E, H, M, B, device=q.device, dtype=torch.float)
     cl = torch.empty_like(cr)
 
@@ -693,10 +545,14 @@ def monarch_attention_triton(
             *_ar_strides,
             k,
             *k_strides,
+            v,
+            *v_strides,
             cr,
             *cr_strides,
             al,
             *al_strides,
+            y,
+            *y_strides,
             cl,
             *cl_strides,
             attn_mask,
@@ -709,6 +565,7 @@ def monarch_attention_triton(
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
             EPS=eps,  # type: ignore
+            COMPUTE_Y=False,  # type: ignore
         )
 
         _ar_cr_kernel[grid_ehb](
@@ -731,14 +588,11 @@ def monarch_attention_triton(
             PRE_PAD=pre_pad,  # type: ignore
         )
 
-    y = torch.empty_like(al)
-    y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
-
     is_first_call_y = T == 1
     _ar_y = q if is_first_call_y else ar
     _ar_y_strides = q_strides if is_first_call_y else ar_strides
 
-    _al_y_cl_kernel[grid_ehm](
+    _al_cl_kernel[grid_ehm](
         _ar_y,
         *_ar_y_strides,
         k,
@@ -763,6 +617,7 @@ def monarch_attention_triton(
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
         EPS=eps,  # type: ignore
+        COMPUTE_Y=True,  # type: ignore
     )
 
     z = torch.empty_like(v)

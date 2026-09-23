@@ -7,7 +7,7 @@ Tensor = torch.Tensor
 xlogy = torch.special.xlogy
 
 
-def al_cl_ref(ar, k, cr, sm_scale, mask, eps=1e-12):
+def al_cl_ref(ar, k, cr, sm_scale, mask, v=None, eps=1e-12):
     r_hat = sm_scale * (ar @ k.transpose(-1, -2)).to(torch.float)
     r_hat = r_hat / (cr[..., :, None] + eps)
     r_hat = r_hat + torch.where(mask[..., None, :], 0.0, -float("inf"))
@@ -19,8 +19,9 @@ def al_cl_ref(ar, k, cr, sm_scale, mask, eps=1e-12):
 
     cl = torch.sum(xlogy(r, r), dim=-1).transpose(-1, -2)
     al = sm_scale * (r.to(k.dtype) @ k).transpose(-2, -3)
+    y = None if v is None else (r.to(v.dtype) @ v).transpose(-2, -3)
 
-    return al, cl
+    return al, cl, y
 
 
 def ar_cr_ref(al, q, cl, mask_t):
@@ -33,23 +34,6 @@ def ar_cr_ref(al, q, cl, mask_t):
     ar = (l.to(q.dtype) @ q).transpose(-2, -3)
 
     return ar, cr
-
-
-def al_y_cl_ref(ar, k, v, cr, sm_scale, mask, eps=1e-12):
-    r_hat = sm_scale * (ar @ k.transpose(-1, -2)).to(torch.float)
-    r_hat = r_hat / (cr[..., :, None] + eps)
-    r_hat = r_hat + torch.where(mask[..., None, :], 0.0, -float("inf"))
-    r_hat = torch.exp(
-        r_hat - torch.clamp(torch.max(r_hat, dim=-1, keepdim=True).values, min=eps)
-    )
-    r = r_hat / (torch.sum(r_hat, dim=-1, keepdim=True) + eps)
-    r = torch.clamp(r, min=torch.finfo(r.dtype).tiny)
-
-    cl = torch.sum(xlogy(r, r), dim=-1).transpose(-1, -2)
-    al = sm_scale * (r.to(k.dtype) @ k).transpose(-2, -3)
-    y = (r.to(v.dtype) @ v).transpose(-2, -3)
-
-    return al, y, cl
 
 
 def z_ref(al, q, cl, y):
@@ -90,7 +74,7 @@ def monarch_attention_torch(
     q = q.transpose(-2, -3)
 
     pad_offset = N_padded - N if pre_pad else 0
-    range_n = torch.arange(M * B).view(M, B).to(q.device)
+    range_n = torch.arange(M * B, device=q.device).view(M, B)
     mask = range_n >= pad_offset if pre_pad else range_n < N
 
     if attn_mask is not None:
@@ -98,10 +82,10 @@ def monarch_attention_torch(
         mask = torch.logical_and(mask, attn_mask)
 
     for _ in range(T - 1):
-        al, cl = al_cl_ref(ar, k, cr, sm_scale, mask)
+        al, cl, _ = al_cl_ref(ar, k, cr, sm_scale, mask)
         ar, cr = ar_cr_ref(al, q, cl, mask.mT)
 
-    al, y, cl = al_y_cl_ref(ar, k, v, cr, sm_scale, mask)
+    al, cl, y = al_cl_ref(ar, k, cr, sm_scale, mask, v)
     z = z_ref(al, q, cl, y)
     z = z.view(E, H, N_padded, Dv)
 

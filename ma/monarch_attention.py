@@ -1,4 +1,3 @@
-from collections.abc import Callable
 from enum import StrEnum
 
 import torch
@@ -6,27 +5,14 @@ import torch.nn as nn
 
 from ma.ma_torch import monarch_attention_torch
 
-Tensor = torch.Tensor
-
-MonarchAttentionFn = Callable[
-    [Tensor, Tensor, Tensor, Tensor | None, int, int, bool], Tensor
-]
-
-_IMPLEMENTATIONS: dict[str, MonarchAttentionFn] = {}
-
-
-def register_impl(name: str, fn: MonarchAttentionFn) -> None:
-    _IMPLEMENTATIONS[name] = fn
-
-
-register_impl("torch", monarch_attention_torch)
-
 try:
     from ma.ma_triton import monarch_attention_triton
+except ModuleNotFoundError as e:  # Triton isn't available on every platform
+    if e.name != "triton":
+        raise
+    monarch_attention_triton = None
 
-    register_impl("triton", monarch_attention_triton)
-except ImportError:
-    pass
+IMPLEMENTATIONS = {"torch": monarch_attention_torch, "triton": monarch_attention_triton}
 
 
 class PadType(StrEnum):
@@ -35,17 +21,28 @@ class PadType(StrEnum):
 
 
 class MonarchAttention(nn.Module):
+    """Sub-quadratic approximation of softmax attention with Monarch matrices.
 
-    def __init__(self, block_size, num_steps, pad_type, impl="torch"):
+    Args:
+        block_size: Monarch block size B; sequences are padded to a multiple of it.
+        num_steps: number of alternating optimization steps T.
+        pad_type: whether padding goes before (`pre`) or after (`post`) the sequence.
+        impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels).
+
+    `forward(query, key, value, attention_mask=None)` takes tensors of shape
+    (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask with
+    1 for tokens to keep, and returns (batch, heads, seq_len, head_dim).
+    """
+
+    def __init__(self, block_size: int, num_steps: int, pad_type: PadType, impl: str = "torch"):
         super().__init__()
+        if IMPLEMENTATIONS.get(impl) is None:
+            available = ", ".join(name for name, fn in IMPLEMENTATIONS.items() if fn)
+            raise ValueError(f"Unknown or unavailable impl {impl!r}. Available: {available}")
         self.block_size = block_size
         self.num_steps = num_steps
         self.pad_type = pad_type
-
-        if impl not in _IMPLEMENTATIONS:
-            available = ", ".join(sorted(_IMPLEMENTATIONS))
-            raise ValueError(f"Unknown impl {impl!r}. Available: {available}")
-        self._impl_fn = _IMPLEMENTATIONS[impl]
+        self._impl_fn = IMPLEMENTATIONS[impl]
 
     def forward(self, query, key, value, attention_mask=None):
         return self._impl_fn(
@@ -59,8 +56,9 @@ class MonarchAttention(nn.Module):
         )
 
     def get_matrix(self, query, key, attention_mask=None):
+        """The (batch, heads, seq_len, seq_len) attention matrix this module applies."""
         batch_size, num_heads, seq_len, _ = query.shape
-        value = torch.eye(seq_len, device=query.device).expand(
+        value = torch.eye(seq_len, device=query.device, dtype=query.dtype).expand(
             batch_size, num_heads, seq_len, seq_len
         )
         return self.forward(query, key, value, attention_mask)

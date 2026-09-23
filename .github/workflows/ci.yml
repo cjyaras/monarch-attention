@@ -15,3 +15,15 @@ jobs:
         run: uvx ruff check .
       - name: Lock file is up to date
         run: uv lock --check
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Install with the CPU build of torch
+        run: |
+          uv venv
+          uv pip install --torch-backend=cpu -e . pytest
+      - name: Tests (CUDA-only tests are skipped)
+        run: .venv/bin/python -m pytest

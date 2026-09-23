@@ -17,10 +17,10 @@ To use `ma` from another project: `pip install git+https://github.com/cjyaras/mo
 
 ## Usage
 
-Run the tests (GPU tests are skipped without CUDA):
+Run the tests (CUDA-only tests are skipped without a GPU):
 
 ```
-uv run pytest ma/tests
+uv run pytest
 ```
 
 Lint (also run in CI):
