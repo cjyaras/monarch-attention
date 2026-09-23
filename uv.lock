@@ -1001,7 +1001,7 @@ requires-dist = [
     { name = "numpy", marker = "extra == 'experiments'" },
     { name = "rouge-score", marker = "extra == 'experiments'" },
     { name = "setuptools", marker = "extra == 'experiments'", specifier = "<81" },
-    { name = "torch", specifier = ">=2.6.0" },
+    { name = "torch", specifier = ">=2.14" },
     { name = "torch-geometric", marker = "extra == 'experiments'" },
     { name = "torchtnt", marker = "extra == 'experiments'" },
     { name = "torchvision", marker = "extra == 'experiments'" },
