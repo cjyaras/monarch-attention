@@ -41,7 +41,7 @@ export SCRIPT_ARGS=" \
 --save_total_limit 1 \
 --learning_rate $lr \
 --weight_decay $wd \
---warmup_ratio 0.03 \
+--warmup_steps 0.03 \
 --lr_scheduler_type cosine \
 --logging_steps 10 \
 --do_train \
@@ -90,7 +90,7 @@ export SCRIPT_ARGS=" \
 --save_total_limit 1 \
 --learning_rate $lr \
 --weight_decay $wd \
---warmup_ratio 0.03 \
+--warmup_steps 0.03 \
 --lr_scheduler_type cosine \
 --logging_steps 10 \
 --do_train \
