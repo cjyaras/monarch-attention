@@ -12,19 +12,20 @@ Tensor = torch.Tensor
 
 
 @cache
-def _config(n: int) -> dict:
-    """Launch configuration for a softmax over n entries (keys of a block, or
-    blocks), tuned on an A100 for batch sizes 1 and 8.
+def _config(n: int, blocks: bool) -> dict:
+    """Launch configuration for a softmax over n entries: the keys of a block
+    (_al_cl_kernel) or the blocks (`blocks`: _ar_cr_kernel, _z_kernel), tuned on
+    an A100 SXM for batch sizes 1 and 8.
 
-    Each program takes BLOCK_R query rows, up to 128 (fewer only if that pads
-    less than 128 would), and streams over the n entries in chunks of BLOCK_C.
+    Each program takes BLOCK_R query rows, up to 128 (for keys, 64 if 128 would
+    pad much more), and streams over the n entries in chunks of BLOCK_C.
     """
     rows = min(max(triton.next_power_of_2(n), 16), 128)
-    if n > 128 and triton.cdiv(n, 128) * 128 - n > n // 8:
+    if not blocks and n > 128 and triton.cdiv(n, 128) * 128 - n > n // 8:
         rows = 64
     return dict(
         BLOCK_R=rows,
-        BLOCK_C=min(rows, 32),
+        BLOCK_C=min(rows, 64 if n >= 128 else 32),
         num_warps=2 if n <= 32 else 4,
         num_stages=2,
     )
@@ -527,8 +528,8 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
 
     # _al_cl_kernel: softmax over B keys, _ar_cr_kernel and _z_kernel: softmax
     # over M blocks
-    config_b = _config(B)
-    config_m = _config(M)
+    config_b = _config(B, blocks=False)
+    config_m = _config(M, blocks=True)
     grid_al_cl = (E * H * M, triton.cdiv(B, config_b["BLOCK_R"]))
     grid_z = (E * H * B, triton.cdiv(M, config_m["BLOCK_R"]))
 
