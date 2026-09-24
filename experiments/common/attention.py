@@ -18,7 +18,6 @@ from transformers.masking_utils import AttentionMaskInterface, sdpa_mask
 from experiments.common.baselines import (
     Cosformer,
     LinearAttention,
-    Linformer,
     Nystromformer,
     Performer,
     Softmax,
@@ -30,7 +29,6 @@ class AttentionType(StrEnum):
     softmax = "softmax"
     monarch_attention = "monarch-attention"
     monarch = "monarch-attention"  # alias, used by the DiT command-line scripts
-    linformer = "linformer"
     performer = "performer"
     nystromformer = "nystromformer"
     cosformer = "cosformer"
@@ -40,7 +38,6 @@ class AttentionType(StrEnum):
 ATTENTION_TYPE_TO_MODULE = {
     AttentionType.softmax: Softmax,
     AttentionType.monarch_attention: MonarchAttention,
-    AttentionType.linformer: Linformer,
     AttentionType.performer: Performer,
     AttentionType.nystromformer: Nystromformer,
     AttentionType.cosformer: Cosformer,
@@ -84,11 +81,12 @@ def get_attn_module(config, layer_num: int | None = None) -> nn.Module:
         case AttentionType.monarch_attention:
             impl = "triton" if torch.cuda.is_available() else "torch"
             args = (config.block_size, config.num_steps, config.pad_type, impl)
-        case (
-            AttentionType.linformer
-            | AttentionType.performer
-            | AttentionType.nystromformer
-        ):
+        case AttentionType.performer:
+            args = (
+                config.rank,
+                layer_num or 0,
+            )  # each layer gets its own random features
+        case AttentionType.nystromformer:
             args = (config.rank,)
         case AttentionType.cosformer | AttentionType.linear_attention:
             args = ()

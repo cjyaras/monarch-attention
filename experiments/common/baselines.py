@@ -4,7 +4,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers.modeling_attn_mask_utils import _prepare_4d_attention_mask_for_sdpa
 
 Tensor = torch.Tensor
 
@@ -47,12 +46,17 @@ class Softmax(Baseline):
     ) -> Tensor:
         head_dim = query.shape[-1]
 
-        if self.use_flash_attention:
+        if attention_mask is not None:
+            # Additive mask over keys; none at all without padding, so SDPA can use
+            # its fastest kernel
             attention_mask = (
-                _prepare_4d_attention_mask_for_sdpa(attention_mask, dtype=query.dtype)
-                if attention_mask is not None
-                else None
+                None
+                if attention_mask.all()
+                else (1.0 - attention_mask[:, None, None, :].to(query.dtype))
+                * torch.finfo(query.dtype).min
             )
+
+        if self.use_flash_attention:
             return F.scaled_dot_product_attention(
                 query=query,
                 key=key,
@@ -61,14 +65,6 @@ class Softmax(Baseline):
             )
 
         else:
-            attention_mask = (
-                (
-                    (1.0 - attention_mask[:, None, None, :])
-                    * torch.finfo(query.dtype).min
-                )
-                if attention_mask is not None
-                else None
-            )
             attention_scores = torch.matmul(query, key.transpose(-1, -2))
             attention_scores = attention_scores / math.sqrt(head_dim)
 
@@ -77,37 +73,6 @@ class Softmax(Baseline):
 
             attention_probs = F.softmax(attention_scores, dim=-1)
             return torch.matmul(attention_probs, value)
-
-
-class Linformer(Baseline):
-    def __init__(self, rank: int):
-        super().__init__()
-        self.rank = rank
-
-    def forward(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        attention_mask: Tensor | None = None,
-    ) -> Tensor:
-        batch_size, num_heads, seq_len, head_dim = query.shape
-
-        if attention_mask is not None:
-            key = attention_mask[:, None, :, None] * key
-            value = attention_mask[:, None, :, None] * value
-
-        # TODO: Check if this projection is correct
-        R = torch.randn(self.rank, seq_len).to(query.device) / math.sqrt(self.rank)
-
-        key = torch.matmul(R, key)
-        value = torch.matmul(R, value)
-
-        attention_scores = torch.matmul(query, key.transpose(-1, -2))
-        attention_scores = attention_scores / math.sqrt(head_dim)
-
-        attention_probs = F.softmax(attention_scores, dim=-1)
-        return torch.matmul(attention_probs, value)
 
 
 class KernelAttention(Baseline):
@@ -121,7 +86,7 @@ class KernelAttention(Baseline):
         value: Tensor,
         attention_mask: Tensor | None = None,
     ) -> Tensor:
-        batch_size, num_heads, seq_len, head_dim = query.shape
+        head_dim = query.shape[-1]
 
         query = query / math.sqrt(math.sqrt(head_dim))
         key = key / math.sqrt(math.sqrt(head_dim))
@@ -154,13 +119,25 @@ class KernelAttention(Baseline):
 
 
 class Performer(KernelAttention):
-    def __init__(self, rank: int):
+    def __init__(self, rank: int, seed: int = 0):
         super().__init__()
         self.rank = rank
+        self.seed = seed
+        self.omega = None
 
     def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
         dim = q.shape[-1]
-        omega = torch.randn(dim, self.rank).to(q.device)
+        if (
+            self.omega is None
+            or self.omega.shape[0] != dim
+            or self.omega.device != q.device
+        ):
+            # Random features are drawn once, from a fixed seed, so results are repeatable
+            generator = torch.Generator(device=q.device).manual_seed(self.seed)
+            self.omega = torch.randn(
+                dim, self.rank, generator=generator, device=q.device
+            )
+        omega = self.omega
         phi_q = torch.exp(
             torch.matmul(q, omega) - torch.linalg.norm(q, dim=-1, keepdim=True) ** 2 / 2
         )

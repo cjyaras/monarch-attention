@@ -18,7 +18,7 @@ Key arguments:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--attention_type` | `softmax` | `softmax`, `monarch`, `linformer`, `performer`, `nystromformer`, `cosformer` |
+| `--attention_type` | `softmax` | `softmax`, `monarch`, `performer`, `nystromformer`, `cosformer` |
 | `--monarch_block_size` | `16` | Block size for Monarch Attention |
 | `--monarch_num_steps` | `3` | Number of steps for Monarch Attention |
 | `--rank` | `64` | Rank for low-rank attention methods |

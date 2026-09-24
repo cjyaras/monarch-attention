@@ -6,8 +6,6 @@ import pyarrow.parquet as pq
 from datasets import Dataset, load_dataset
 from huggingface_hub import HfApi, constants, hf_hub_download, snapshot_download
 
-from experiments.common.utils import get_device, move
-from experiments.vit.processor import get_processor
 
 REPO_ID = "ILSVRC/imagenet-1k"
 
@@ -52,20 +50,3 @@ def get_dataset(
     assert isinstance(dataset, Dataset)
     dataset = dataset.select(range(num_samples)) if num_samples is not None else dataset
     return dataset
-
-
-def get_processed_dataset(
-    num_samples: Optional[int] = None, split: str = "validation"
-) -> Dataset:
-    device = get_device()
-    dataset = get_dataset(num_samples, split)
-    processor = get_processor()
-
-    def transform(example_batch):
-        inputs = processor(
-            [x.convert("RGB") for x in example_batch["image"]], return_tensors="pt"
-        )
-        return move(inputs, device)
-
-    processed_dataset = dataset.with_transform(transform)
-    return processed_dataset

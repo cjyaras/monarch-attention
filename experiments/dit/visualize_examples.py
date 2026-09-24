@@ -34,7 +34,6 @@ def parse_args():
         choices=[
             "softmax",
             "monarch",
-            "linformer",
             "performer",
             "nystromformer",
             "cosformer",
