@@ -1,4 +1,5 @@
-"""Benchmark MonarchAttention's Triton kernels against softmax attention (SDPA).
+"""Benchmark MonarchAttention's Triton kernels against softmax attention: PyTorch's
+scaled_dot_product_attention (SDPA), and FlashAttention-4 if it is installed.
 
 Writes one CSV row per (sweep, batch size, sequence length, method) with the
 runtime and peak GPU memory; perfbench/plot.py turns the CSV into figures.
@@ -18,6 +19,11 @@ from triton.testing import do_bench
 
 from ma.ma_torch import monarch_attention_torch
 from ma.ma_triton import monarch_attention_triton
+
+try:
+    from flash_attn.cute import flash_attn_func as flash_attn_4
+except ImportError:  # optional: pip install flash-attn-4 (Hopper and Blackwell GPUs)
+    flash_attn_4 = None
 
 SEQ_LENS = [2**i for i in range(10, 15)]  # sequence length sweep, at batch size 1
 DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
@@ -78,8 +84,21 @@ def benchmark(batch: int, seq_len: int, args) -> list[dict]:
         monarch(q[:1], k[:1], v[:1]), expected, atol=2e-2, rtol=2e-2
     )
 
+    methods = [("monarch-attention", monarch), ("softmax", softmax)]
+    if flash_attn_4 is not None:
+        # FlashAttention-4 takes (batch, seq_len, heads, head_dim)
+        q4, k4, v4 = (t.transpose(1, 2).contiguous() for t in (q, k, v))
+
+        def fa4():
+            return flash_attn_4(q4, k4, v4)[0]  # (output, log-sum-exp)
+
+        torch.testing.assert_close(
+            fa4().transpose(1, 2), softmax(), atol=2e-2, rtol=2e-2
+        )
+        methods.append(("flash-attention-4", fa4))
+
     rows = []
-    for method, fn in [("monarch-attention", monarch), ("softmax", softmax)]:
+    for method, fn in methods:
         ms, peak_mb = measure(fn, args.profile)
         rows.append(
             {

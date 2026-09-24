@@ -1,7 +1,10 @@
 # Runtime benchmarks
 
 Compares the MonarchAttention Triton kernels with softmax attention
-(`F.scaled_dot_product_attention`, i.e. FlashAttention-2) on a CUDA GPU. From the repo root:
+(`F.scaled_dot_product_attention`: FlashAttention-2 on an A100, cuDNN on an H100) on a CUDA
+GPU, and with
+[FlashAttention-4](https://github.com/Dao-AILab/flash-attention) when it is installed (Hopper
+and Blackwell GPUs; add `--with "flash-attn-4[cu13]"` to `uv run`). From the repo root:
 
 ```
 uv run python -m perfbench.bench --sweep seq_len   # measure, write perfbench/results/runtime.csv

@@ -4,9 +4,21 @@ Code for [MonarchAttention](https://arxiv.org/abs/2505.18698) (NeurIPS 2025).
 
 ## Speed
 
-Forward pass of MonarchAttention's Triton kernels vs FlashAttention-2 (PyTorch's
-`scaled_dot_product_attention`) on an NVIDIA A100 80 GB: fp16, batch size 1, 12 heads, head
-dimension 64, one step (`num_steps=1`) and block size a power of two near √N.
+Forward pass of MonarchAttention's Triton kernels vs softmax attention: fp16, batch size 1,
+12 heads, head dimension 64, one step (`num_steps=1`) and block size a power of two near √N.
+
+NVIDIA H100 80 GB, vs [FlashAttention-4](https://github.com/Dao-AILab/flash-attention) and
+PyTorch's `scaled_dot_product_attention` (cuDNN):
+
+| Sequence length N | FlashAttention-4 | PyTorch SDPA | MonarchAttention | Speedup vs FA4 |
+|---:|---:|---:|---:|---:|
+| 1,024 | 0.020 ms | 0.019 ms | 0.015 ms | 1.4x |
+| 2,048 | 0.031 ms | 0.045 ms | 0.021 ms | 1.5x |
+| 4,096 | 0.104 ms | 0.119 ms | 0.031 ms | 3.4x |
+| 8,192 | 0.398 ms | 0.459 ms | 0.063 ms | 6.3x |
+| 16,384 | 1.563 ms | 1.818 ms | 0.133 ms | 12x |
+
+NVIDIA A100 80 GB, vs PyTorch's `scaled_dot_product_attention` (FlashAttention-2):
 
 | Sequence length N | FlashAttention-2 | MonarchAttention | Speedup |
 |---:|---:|---:|---:|
