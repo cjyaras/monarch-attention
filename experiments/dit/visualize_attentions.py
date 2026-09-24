@@ -1,25 +1,13 @@
-from typing import List, Dict
 import os
 
 import matplotlib.pyplot as plt
 import torch
 import numpy as np
 
-from experiments.common.attention import AttentionType
+from experiments.common.attention import AttentionType, get_mixed_type
+from experiments.dit.model import NUM_LAYERS
 from experiments.common.baselines import Softmax, Nystromformer
 from experiments.dit.extract import extract_query_key
-
-
-def generate_attn_dict(
-    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
-) -> Dict:
-    assert max(layers_to_replace) <= num_layers
-
-    attn_dict = {}
-    for i in range(1, num_layers + 1):
-        attn_dict[i] = attn_type if i in layers_to_replace else AttentionType.softmax
-
-    return attn_dict
 
 
 @torch.no_grad()
@@ -36,7 +24,9 @@ def main():
         torch.save(key, "experiments/dit/key.pt")
 
     if not os.path.exists("experiments/dit/query_first_half_nystrom.pt"):
-        attn_type = generate_attn_dict(AttentionType.nystromformer, list(range(1, 15)))
+        attn_type = get_mixed_type(
+            range(14), AttentionType.nystromformer, num_layers=NUM_LAYERS
+        )
         query, key = extract_query_key(
             attn_type, words=["triceratops"], seed=0, num_inference_steps=1
         )

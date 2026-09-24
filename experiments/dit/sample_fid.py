@@ -1,4 +1,3 @@
-from typing import List, Dict
 import argparse
 import torch
 import os
@@ -8,7 +7,8 @@ from math import ceil
 from tqdm import tqdm
 
 
-from experiments.common.attention import AttentionType
+from experiments.common.attention import AttentionType, get_mixed_type
+from experiments.dit.model import NUM_LAYERS
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
@@ -21,20 +21,6 @@ def save_images_as_npz(output: ImagePipelineOutput, save_fname: str):
     images = output.images  # (B x H x W x C)
     np.savez(save_fname, arr0=images)
     print(f"Saved .npz file to {save_fname} [shape = {images.shape}]")
-
-
-def generate_attn_dict(
-    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
-) -> Dict:
-    assert max(layers_to_replace) <= num_layers
-
-    attn_dict = {}
-    for i in range(num_layers):
-        attn_dict[i + 1] = (
-            attn_type if i in layers_to_replace else AttentionType.softmax
-        )
-
-    return attn_dict
 
 
 def parse_args():
@@ -149,9 +135,10 @@ def main():
             )
             save_path = os.path.join(parent_save_dir, attention_type, experiment_dir)
 
-            attn_dict = generate_attn_dict(
+            attn_dict = get_mixed_type(
+                layers_to_replace,
                 getattr(AttentionType, attention_type),
-                layers_to_replace=layers_to_replace,
+                num_layers=NUM_LAYERS,
             )  # , *attn_params)
             print(attn_dict)
             pipe = get_pipeline(

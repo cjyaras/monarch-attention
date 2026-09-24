@@ -1,4 +1,3 @@
-from typing import List, Dict
 import argparse
 import torch
 import os
@@ -6,7 +5,8 @@ import os
 import numpy as np
 
 
-from experiments.common.attention import AttentionType
+from experiments.common.attention import AttentionType, get_mixed_type
+from experiments.dit.model import NUM_LAYERS
 from experiments.dit.pipeline import get_pipeline
 from diffusers.pipelines.pipeline_utils import ImagePipelineOutput
 
@@ -22,20 +22,6 @@ def save_output_images(
     images = torch.Tensor(output.images)
     images_reshaped = images.permute(0, 3, 1, 2)
     save_image(images_reshaped, save_path, nrow=num_images_per_row)
-
-
-def generate_attn_dict(
-    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
-) -> Dict:
-    assert max(layers_to_replace) <= num_layers
-
-    attn_dict = {}
-    for i in range(num_layers):
-        attn_dict[i + 1] = (
-            attn_type if i in layers_to_replace else AttentionType.softmax
-        )
-
-    return attn_dict
 
 
 def parse_args():
@@ -117,9 +103,10 @@ def main():
             )
         else:
             layers_to_replace = list(range(14, 28))  # Replace first half of layers
-            attn_dict = generate_attn_dict(
+            attn_dict = get_mixed_type(
+                layers_to_replace,
                 getattr(AttentionType, attention_type),
-                layers_to_replace=layers_to_replace,
+                num_layers=NUM_LAYERS,
             )
             print(attn_dict)
             pipe = get_pipeline(

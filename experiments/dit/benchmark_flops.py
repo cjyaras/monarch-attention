@@ -1,25 +1,13 @@
-from typing import List, Dict
 import argparse
 import torch
 
 import numpy as np
 
 
-from experiments.common.attention import AttentionType
+from experiments.common.attention import AttentionType, get_mixed_type
+from experiments.dit.model import NUM_LAYERS
 from experiments.common.utils import attention_bmm_flops
 from experiments.dit.pipeline import get_pipeline, CustomDiTPipeline
-
-
-def generate_attn_dict(
-    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
-) -> Dict:
-    assert max(layers_to_replace) <= num_layers
-
-    attn_dict = {}
-    for i in range(1, num_layers + 1):
-        attn_dict[i] = attn_type if i in layers_to_replace else AttentionType.softmax
-
-    return attn_dict
 
 
 def benchmark_flops(
@@ -128,9 +116,10 @@ def main():
             )
         else:
             layers_to_replace = list(range(14))  # Replace first half of layers
-            attn_dict = generate_attn_dict(
+            attn_dict = get_mixed_type(
+                layers_to_replace,
                 getattr(AttentionType, attention_type),
-                layers_to_replace=layers_to_replace,
+                num_layers=NUM_LAYERS,
             )
             pipe = get_pipeline(
                 attn_dict, rank=rank, block_size=block_size, num_steps=num_steps
