@@ -7,11 +7,11 @@ import torch.nn as nn
 from ma.ma_torch import monarch_attention_torch
 
 try:
-    from ma.ma_triton import monarch_attention_triton
+    from ma.ma_triton import MAX_WORKSPACE, monarch_attention_triton
 except ModuleNotFoundError as e:  # Triton isn't available on every platform
     if e.name != "triton":
         raise
-    monarch_attention_triton = None
+    MAX_WORKSPACE, monarch_attention_triton = None, None
 
 IMPLEMENTATIONS = {"torch": monarch_attention_torch, "triton": monarch_attention_triton}
 
@@ -49,6 +49,10 @@ class MonarchAttention(nn.Module):
         num_steps: number of alternating optimization steps T.
         pad_type: whether padding goes before (`pre`) or after (`post`) the sequence.
         impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels).
+        max_workspace: for the Triton kernels, the most bytes of intermediate
+            buffers per call (default 256 MiB; None: no limit). The buffers take
+            ~2x the output's memory, so larger inputs are processed a group of
+            heads or batch elements at a time.
 
     `forward(query, key, value, attention_mask=None)` takes tensors of shape
     (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask that
@@ -56,7 +60,12 @@ class MonarchAttention(nn.Module):
     """
 
     def __init__(
-        self, block_size: int, num_steps: int, pad_type: PadType, impl: str = "torch"
+        self,
+        block_size: int,
+        num_steps: int,
+        pad_type: PadType,
+        impl: str = "torch",
+        max_workspace: int | None = MAX_WORKSPACE,
     ):
         super().__init__()
         if IMPLEMENTATIONS.get(impl) is None:
@@ -68,12 +77,14 @@ class MonarchAttention(nn.Module):
         self.num_steps = num_steps
         self.pad_type = pad_type
         self.impl = impl
+        self.max_workspace = max_workspace
 
     def forward(self, query, key, value, attention_mask=None):
-        impl_fn = IMPLEMENTATIONS[_impl_override or self.impl]
+        impl = _impl_override or self.impl
         if attention_mask is not None:
             attention_mask = attention_mask.bool()
-        return impl_fn(
+        options = {"max_workspace": self.max_workspace} if impl == "triton" else {}
+        return IMPLEMENTATIONS[impl](
             query,
             key,
             value,
@@ -81,6 +92,7 @@ class MonarchAttention(nn.Module):
             self.num_steps,
             self.block_size,
             self.pad_type == PadType.pre,
+            **options,
         )
 
     def get_matrix(self, query, key, attention_mask=None):

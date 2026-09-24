@@ -196,3 +196,39 @@ def test_cached_launches(T):
         torch.testing.assert_close(
             monarch_attention_triton(q, k, v, mask, T, 16, False), first
         )
+
+
+@requires_cuda
+@pytest.mark.parametrize("T", [1, 2])
+@pytest.mark.parametrize("group", ["batch", "heads"])
+def test_workspace_limit(T, group):
+    """With a small max_workspace, heads or batch elements are processed in
+    groups; the output must not change."""
+    from ma.ma_triton import _workspace_per_head, monarch_attention_triton
+
+    torch.manual_seed(0)
+    E, H, N, D, B = 3, 4, 300, 32, 16
+    q, k, v = _rand_qkv(E, H, N, D, torch.float16)
+    mask = _make_block_safe_mask(E, N, B)
+    full = monarch_attention_triton(q, k, v, mask, T, B, True, max_workspace=None)
+    per_head = _workspace_per_head(q, T, B)
+    # 2 of 3 batch elements per group, or 3 of 4 heads (uneven last groups)
+    budget = 2 * H * per_head if group == "batch" else 3 * per_head
+    for _ in range(2):  # the second call launches cached kernels
+        out = monarch_attention_triton(q, k, v, mask, T, B, True, max_workspace=budget)
+        assert torch.equal(out, full)
+
+
+@requires_cuda
+def test_workspace_limit_compiled():
+    from ma import MonarchAttention, PadType
+    from ma.ma_triton import _workspace_per_head
+
+    torch.manual_seed(0)
+    q, k, v = _rand_qkv(2, 4, 300, 32, torch.float16)
+    budget = 3 * _workspace_per_head(q, 1, 16)
+    attn = MonarchAttention(16, 1, PadType.post, impl="triton", max_workspace=budget)
+    expected = MonarchAttention(16, 1, PadType.post, "triton", max_workspace=None)
+    torch.testing.assert_close(
+        torch.compile(attn, fullgraph=True)(q, k, v), expected(q, k, v)
+    )

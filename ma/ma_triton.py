@@ -547,8 +547,9 @@ def _z_kernel(
         tl.store(lse_block_ptr, row_max + tl.log2(denom), mask=mask_r)
 
 
-def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
-    """The kernel launches; `launch` wraps each kernel (wrap_triton in the op)."""
+def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch, z) -> None:
+    """The kernel launches, writing the output into z; `launch` wraps each
+    kernel (wrap_triton in the op)."""
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 
@@ -588,7 +589,6 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
     all_blocks = config_m["BLOCK_R"] >= M
     lse = torch.empty_like(cl) if T > 1 and not all_blocks else None
 
-    z = torch.empty_like(v)
     z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
 
     attn_mask_strides = (
@@ -707,6 +707,51 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
         **config_z,
     )
 
+
+MAX_WORKSPACE = 256 * 2**20  # bytes of intermediate buffers per call, by default
+
+
+def _workspace_per_head(q, T, B) -> int:
+    """Bytes of intermediate buffers for one (batch element, head)."""
+    M = triton.cdiv(q.shape[2], B)
+    tokens, D, size = M * B, q.shape[3], q.element_size()
+    per_head = 2 * tokens * D * size + 4 * tokens  # al, y, cl
+    if T > 1:
+        per_head += tokens * D * size + 2 * 4 * tokens  # ar, cr, lse
+    return per_head
+
+
+def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Tensor:
+    """Run the kernels on groups of heads and batch elements whose intermediate
+    buffers fit in max_workspace bytes (0: no limit), one group at a time."""
+    E, H = q.shape[:2]
+    z = torch.empty_like(v)
+    heads = max_workspace // _workspace_per_head(q, T, B) if max_workspace else E * H
+    if heads >= E * H:
+        groups = [(slice(None), slice(None))]
+    elif heads >= H:  # whole batch elements (the mask is per batch element)
+        per = heads // H
+        groups = [(slice(e, e + per), slice(None)) for e in range(0, E, per)]
+    else:  # heads of one batch element; at least one head at a time
+        per = max(heads, 1)
+        groups = [
+            (slice(e, e + 1), slice(h, h + per))
+            for e in range(E)
+            for h in range(0, H, per)
+        ]
+    for i, (batch, head) in enumerate(groups):
+        mask = None if attn_mask is None else attn_mask[batch]
+        _monarch_attention(
+            q[batch, head],
+            k[batch, head],
+            v[batch, head],
+            mask,
+            T,
+            B,
+            pre_pad,
+            make_launch(i),
+            z[batch, head],
+        )
     return z
 
 
@@ -721,8 +766,11 @@ def _monarch_attention_op(
     T: int,
     B: int,
     pre_pad: bool,
+    max_workspace: int,
 ) -> Tensor:
-    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, wrap_triton)
+    return _sliced(
+        q, k, v, attn_mask, T, B, pre_pad, max_workspace, lambda _: wrap_triton
+    )
 
 
 def monarch_attention_triton(
@@ -733,11 +781,16 @@ def monarch_attention_triton(
     T: int,
     B: int,
     pre_pad: bool,
+    max_workspace: int | None = MAX_WORKSPACE,
 ) -> Tensor:
+    """MonarchAttention with the Triton kernels. The intermediate buffers take
+    ~2x the output's memory; with max_workspace (bytes; None: no limit), heads
+    and batch elements are processed in groups whose buffers fit in it."""
+    max_workspace = max_workspace or 0
     if torch.compiler.is_compiling():
-        return _monarch_attention_op(q, k, v, attn_mask, T, B, pre_pad)
+        return _monarch_attention_op(q, k, v, attn_mask, T, B, pre_pad, max_workspace)
     # Everything Triton specializes the kernels on (shapes, strides, dtypes,
-    # pointer alignment) is a function of this key
+    # pointer alignment) is a function of this key and the group number
     key = (
         q.device,
         q.dtype,
@@ -748,13 +801,23 @@ def monarch_attention_triton(
         T,
         B,
         pre_pad,
+        max_workspace,
     )
     key += (q.data_ptr() % 16, k.data_ptr() % 16, v.data_ptr() % 16)
     if attn_mask is not None:
         key += (attn_mask.dtype, attn_mask.shape, attn_mask.stride())
         key += (attn_mask.data_ptr() % 16,)
-    launch = _CachedLaunch(key, q.device.index)
-    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch)
+    return _sliced(
+        q,
+        k,
+        v,
+        attn_mask,
+        T,
+        B,
+        pre_pad,
+        max_workspace,
+        lambda group: _CachedLaunch(key + (group,), q.device.index),
+    )
 
 
 # Compiled kernel and names of its keyword arguments, per (key, launch number)
