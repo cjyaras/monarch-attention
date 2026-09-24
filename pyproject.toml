@@ -26,7 +26,6 @@ experiments = [
     "tqdm",
     "matplotlib",
     "torchvision",
-    "torch_geometric",
     "transformers>=5",
     "diffusers",
     "datasets",
