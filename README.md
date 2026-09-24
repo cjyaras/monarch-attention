@@ -16,7 +16,10 @@ dimension 64, one step (`num_steps=1`) and block size a power of two near √N.
 | 8,192 | 1.243 ms | 0.104 ms | 12x |
 | 16,384 | 4.589 ms | 0.205 ms | 22x |
 
-Reproduce with [`perfbench/`](perfbench).
+These are GPU kernel times. For short sequences, Python launch overhead dominates in eager
+mode (MonarchAttention launches two Triton kernels per call), so run the model under CUDA
+graphs, e.g. `torch.compile(model, mode="reduce-overhead")`. Reproduce with
+[`perfbench/`](perfbench).
 
 ## Setup
 
