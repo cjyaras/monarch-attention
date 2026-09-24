@@ -232,3 +232,26 @@ def test_workspace_limit_compiled():
     torch.testing.assert_close(
         torch.compile(attn, fullgraph=True)(q, k, v), expected(q, k, v)
     )
+
+
+@requires_cuda
+@pytest.mark.parametrize("T", [1, 2])
+@pytest.mark.parametrize("pre_pad", [False, True])
+@pytest.mark.parametrize("positions", [5, 16, 48])
+def test_workspace_limit_positions(T, pre_pad, positions):
+    """A budget below one head's buffers splits each head's positions into
+    groups (5: narrower than a tile, 48: an uneven last group of 32). Groups
+    narrower than a tile use smaller tiles, which round differently."""
+    from ma.ma_triton import _workspace_per_head, monarch_attention_triton
+
+    torch.manual_seed(0)
+    E, H, N, D, B = 2, 2, 1000, 32, 80
+    q, k, v = _rand_qkv(E, H, N, D, torch.float16)
+    mask = _make_block_safe_mask(E, N, B)
+    full = monarch_attention_triton(q, k, v, mask, T, B, pre_pad, max_workspace=None)
+    budget = _workspace_per_head(q, T, B) * positions // B
+    for _ in range(2):  # the second call launches cached kernels
+        out = monarch_attention_triton(
+            q, k, v, mask, T, B, pre_pad, max_workspace=budget
+        )
+        torch.testing.assert_close(out, full, atol=1e-3, rtol=1e-3)

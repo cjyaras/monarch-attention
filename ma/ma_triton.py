@@ -95,6 +95,8 @@ def _al_cl_kernel(
     B: int,
     D: int,
     N: int,
+    b0: int,  # first position of the group (see _sliced)
+    Bg: int,  # positions in the group
     NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     IS_FIRST_CALL: tl.constexpr,
     QK_SCALE: tl.constexpr,
@@ -109,11 +111,13 @@ def _al_cl_kernel(
     # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
     # (E, H, M, B, ...) for _al_cl_kernel
     stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
-        H, M, B, D
+        H, M, Bg, D
     )
-    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(H, M, B, D)
-    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, B, 1)
-    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
+    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(
+        H, M, Bg, D
+    )
+    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, Bg, 1)
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, Bg, 1)
     # One program per (batch, head, block m, chunk of BLOCK_R query rows). It
     # streams over the block's keys in chunks of BLOCK_C with an online softmax.
     # A block's chunks are consecutive programs, so they share its keys in L2.
@@ -126,11 +130,12 @@ def _al_cl_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_r = idx_chunk * BLOCK_R + tl.arange(0, BLOCK_R)
+    range_r = b0 + idx_chunk * BLOCK_R + tl.arange(0, BLOCK_R)  # positions
+    local_r = range_r - b0  # positions within the group
     range_d = tl.arange(0, BLOCK_D)
     range_n_r = B * idx_m + range_r
 
-    mask_r = range_r < B
+    mask_r = local_r < Bg
     pad_mask_r = mask_r & ((range_n_r >= pad_offset) if PRE_PAD else range_n_r < N)
     mask_d = range_d < D
 
@@ -141,7 +146,7 @@ def _al_cl_kernel(
         + stride_ar_h * idx_h
         + stride_ar_m * idx_m
         + (
-            stride_ar_b * (range_r - (pad_offset if IS_FIRST_CALL else 0))[:, None]
+            stride_ar_b * (range_r - (pad_offset if IS_FIRST_CALL else b0))[:, None]
             + stride_ar_d * range_d[None, :]
         )
     )
@@ -156,7 +161,7 @@ def _al_cl_kernel(
             + stride_cr_e * idx_e
             + stride_cr_h * idx_h
             + stride_cr_m * idx_m
-            + (stride_cr_b * range_r)
+            + (stride_cr_b * local_r)
         )
         cr = tl.load(cr_block_ptr, mask=mask_r, other=1.0)
 
@@ -239,7 +244,7 @@ def _al_cl_kernel(
         + stride_cl_e * idx_e
         + stride_cl_h * idx_h
         + stride_cl_m * idx_m
-        + (stride_cl_b * range_r)
+        + (stride_cl_b * local_r)
     )
     tl.store(cl_block_ptr, cl, mask=mask_r)
 
@@ -250,7 +255,7 @@ def _al_cl_kernel(
         + stride_al_e * idx_e
         + stride_al_h * idx_h
         + stride_al_m * idx_m
-        + (stride_al_b * range_r[:, None] + stride_al_d * range_d[None, :])
+        + (stride_al_b * local_r[:, None] + stride_al_d * range_d[None, :])
     )
     tl.store(al_block_ptr, al, mask=mask_r[:, None] & mask_d[None, :])
 
@@ -261,7 +266,7 @@ def _al_cl_kernel(
             + stride_y_e * idx_e
             + stride_y_h * idx_h
             + stride_y_m * idx_m
-            + (stride_y_b * range_r[:, None] + stride_y_d * range_d[None, :])
+            + (stride_y_b * local_r[:, None] + stride_y_d * range_d[None, :])
         )
         tl.store(y_block_ptr, y, mask=mask_r[:, None] & mask_d[None, :])
 
@@ -288,6 +293,8 @@ def _ar_cr_kernel(
     B: int,
     D: int,
     N: int,
+    b0: int,  # first position of the group (see _sliced)
+    Bg: int,  # positions in the group
     NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_R: tl.constexpr,
@@ -300,13 +307,13 @@ def _ar_cr_kernel(
     # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
     # (E, H, M, B, ...) for _al_cl_kernel
     stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
-        H, M, B, D
+        H, M, Bg, D
     )
     stride_ar_e, stride_ar_h, stride_ar_m, stride_ar_b, stride_ar_d = _strides_mb(
-        H, M, B, D
+        H, M, Bg, D
     )
-    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
-    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, B, 1)
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, Bg, 1)
+    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, Bg, 1)
     # One program per (batch, head, position b, chunk of BLOCK_R blocks). It
     # streams over the queries in chunks of BLOCK_C. Each query's softmax over
     # blocks is normalized directly if the program holds all blocks (ALL_BLOCKS),
@@ -314,10 +321,11 @@ def _ar_cr_kernel(
     # position's chunks are consecutive programs, so they share its queries in L2.
     idx_ehb = tl.program_id(0) // NUM_CHUNKS
     idx_chunk = tl.program_id(0) % NUM_CHUNKS
-    idx_eh = idx_ehb // B
+    idx_eh = idx_ehb // Bg
     idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
     idx_h = (idx_eh % H).to(tl.int64)
-    idx_b = idx_ehb % B
+    idx_bl = idx_ehb % Bg  # position within the group
+    idx_b = b0 + idx_bl
 
     pad_offset = M * B - N if PRE_PAD else 0
 
@@ -331,7 +339,7 @@ def _ar_cr_kernel(
         al_ptr
         + stride_al_e * idx_e
         + stride_al_h * idx_h
-        + stride_al_b * idx_b
+        + stride_al_b * idx_bl
         + (stride_al_m * range_r[:, None] + stride_al_d * range_d[None, :])
     )
     al = tl.load(al_block_ptr, mask=mask_r[:, None] & mask_d[None, :], other=0.0)
@@ -339,7 +347,7 @@ def _ar_cr_kernel(
         cl_ptr
         + stride_cl_e * idx_e
         + stride_cl_h * idx_h
-        + stride_cl_b * idx_b
+        + stride_cl_b * idx_bl
         + (stride_cl_m * range_r)
     )
     cl = tl.load(cl_block_ptr, mask=mask_r, other=0.0)
@@ -383,7 +391,7 @@ def _ar_cr_kernel(
                 lse_ptr
                 + stride_cl_e * idx_e
                 + stride_cl_h * idx_h
-                + stride_cl_b * idx_b
+                + stride_cl_b * idx_bl
                 + (stride_cl_m * range_c)
             )
             lse = tl.load(lse_block_ptr, mask=mask_c, other=0.0)
@@ -397,7 +405,7 @@ def _ar_cr_kernel(
         cr_ptr
         + stride_cr_e * idx_e
         + stride_cr_h * idx_h
-        + stride_cr_b * idx_b
+        + stride_cr_b * idx_bl
         + (stride_cr_m * range_r)
     )
     tl.store(cr_block_ptr, acc_cr, mask=mask_r)
@@ -405,7 +413,7 @@ def _ar_cr_kernel(
         ar_ptr
         + stride_ar_e * idx_e
         + stride_ar_h * idx_h
-        + stride_ar_b * idx_b
+        + stride_ar_b * idx_bl
         + (stride_ar_m * range_r[:, None] + stride_ar_d * range_d[None, :])
     )
     tl.store(ar_block_ptr, acc_ar.to(al.dtype), mask=mask_r[:, None] & mask_d[None, :])
@@ -434,6 +442,8 @@ def _z_kernel(
     B: int,
     D: int,
     N: int,
+    b0: int,  # first position of the group (see _sliced)
+    Bg: int,  # positions in the group
     NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     BLOCK_R: tl.constexpr,
     BLOCK_C: tl.constexpr,
@@ -445,10 +455,12 @@ def _z_kernel(
     # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
     # (E, H, M, B, ...) for _al_cl_kernel
     stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
-        H, M, B, D
+        H, M, Bg, D
     )
-    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(H, M, B, D)
-    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
+    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(
+        H, M, Bg, D
+    )
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, Bg, 1)
     # One program per (batch, head, position b, chunk of BLOCK_R query blocks).
     # It streams over the blocks' al, cl and y in chunks of BLOCK_C with an
     # online softmax. With COMPUTE_Z=False it only stores each query's
@@ -456,10 +468,11 @@ def _z_kernel(
     # consecutive programs, so they share its al, cl and y in L2.
     idx_ehb = tl.program_id(0) // NUM_CHUNKS
     idx_chunk = tl.program_id(0) % NUM_CHUNKS
-    idx_eh = idx_ehb // B
+    idx_eh = idx_ehb // Bg
     idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
     idx_h = (idx_eh % H).to(tl.int64)
-    idx_b = idx_ehb % B
+    idx_bl = idx_ehb % Bg  # position within the group
+    idx_b = b0 + idx_bl
 
     pad_offset = M * B - N if PRE_PAD else 0
 
@@ -494,7 +507,7 @@ def _z_kernel(
             al_ptr
             + stride_al_e * idx_e
             + stride_al_h * idx_h
-            + stride_al_b * idx_b
+            + stride_al_b * idx_bl
             + (stride_al_m * range_c[:, None] + stride_al_d * range_d[None, :])
         )
         al = tl.load(al_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
@@ -502,7 +515,7 @@ def _z_kernel(
             cl_ptr
             + stride_cl_e * idx_e
             + stride_cl_h * idx_h
-            + stride_cl_b * idx_b
+            + stride_cl_b * idx_bl
             + (stride_cl_m * range_c)
         )
         cl = tl.load(cl_block_ptr, mask=mask_c, other=0.0)
@@ -520,7 +533,7 @@ def _z_kernel(
                 y_ptr
                 + stride_y_e * idx_e
                 + stride_y_h * idx_h
-                + stride_y_b * idx_b
+                + stride_y_b * idx_bl
                 + (stride_y_m * range_c[:, None] + stride_y_d * range_d[None, :])
             )
             y = tl.load(y_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
@@ -541,29 +554,36 @@ def _z_kernel(
             lse_ptr
             + stride_cl_e * idx_e
             + stride_cl_h * idx_h
-            + stride_cl_b * idx_b
+            + stride_cl_b * idx_bl
             + (stride_cl_m * range_r)
         )
         tl.store(lse_block_ptr, row_max + tl.log2(denom), mask=mask_r)
 
 
-def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch, z) -> None:
+def _monarch_attention(
+    q, k, v, attn_mask, T, B, pre_pad, launch, z, b0=0, Bg=None
+) -> None:
     """The kernel launches, writing the output into z; `launch` wraps each
-    kernel (wrap_triton in the op)."""
+    kernel (wrap_triton in the op). Only positions b0 to b0 + Bg of each block
+    are computed (default: all), which bounds the intermediate buffers."""
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
+    Bg = B if Bg is None else Bg
 
-    HMBDN = (H, M, B, D, N)
+    HMBDN = (H, M, B, D, N, b0, Bg)
 
     # _al_cl_kernel: softmax over B keys, _ar_cr_kernel and _z_kernel: softmax
     # over M blocks
     config_b = _config(B, blocks=False)
+    # Rows are positions, so a narrow group of positions takes fewer per program
+    rows_b = min(config_b["BLOCK_R"], max(triton.next_power_of_2(Bg), 16))
+    config_b = config_b | dict(BLOCK_R=rows_b)
     config_m = _config(M, blocks=True)
     config_z = _z_config(M)  # same tiles as config_m
-    chunks_b = triton.cdiv(B, config_b["BLOCK_R"])
+    chunks_b = triton.cdiv(Bg, config_b["BLOCK_R"])
     chunks_m = triton.cdiv(M, config_m["BLOCK_R"])
     grid_al_cl = (E * H * M * chunks_b, 1)
-    grid_z = (E * H * B * chunks_m, 1)
+    grid_z = (E * H * Bg * chunks_m, 1)
 
     BLOCK_D = max(triton.next_power_of_2(D), 16)
 
@@ -577,13 +597,13 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch, z) -> None:
 
     # Intermediate buffers, contiguous in the layouts the kernels assume
     # (_strides_bm, _strides_mb)
-    al = torch.empty(E, H, B, M, D, device=q.device, dtype=q.dtype)
+    al = torch.empty(E, H, Bg, M, D, device=q.device, dtype=q.dtype)
     y = torch.empty_like(al)
-    cl = torch.empty(E, H, B, M, device=q.device, dtype=torch.float)
+    cl = torch.empty(E, H, Bg, M, device=q.device, dtype=torch.float)
     # Only needed for T > 1: ar, cr and each query's log-sum-exp over blocks
-    ar = torch.empty(E, H, M, B, D, device=q.device, dtype=q.dtype) if T > 1 else None
-    ar_strides = (H * M * B * D, M * B * D, B * D, D, 1)
-    cr = torch.empty(E, H, M, B, device=q.device, dtype=torch.float) if T > 1 else None
+    ar = torch.empty(E, H, M, Bg, D, device=q.device, dtype=q.dtype) if T > 1 else None
+    ar_strides = (H * M * Bg * D, M * Bg * D, Bg * D, D, 1)
+    cr = torch.empty(E, H, M, Bg, device=q.device, dtype=torch.float) if T > 1 else None
     # _ar_cr_kernel needs each query's log-sum-exp over blocks unless one
     # program holds all of them
     all_blocks = config_m["BLOCK_R"] >= M
@@ -722,24 +742,37 @@ def _workspace_per_head(q, T, B) -> int:
 
 
 def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Tensor:
-    """Run the kernels on groups of heads and batch elements whose intermediate
-    buffers fit in max_workspace bytes (0: no limit), one group at a time."""
+    """Run the kernels on groups whose intermediate buffers fit in max_workspace
+    bytes (0: no limit), one group at a time: batch elements, else heads of one
+    batch element, else positions of one head. Every position b of a block only
+    needs position b of the other blocks' intermediates, so positions split too
+    (each group re-reads all keys and values)."""
     E, H = q.shape[:2]
     z = torch.empty_like(v)
-    heads = max_workspace // _workspace_per_head(q, T, B) if max_workspace else E * H
+    per_head = _workspace_per_head(q, T, B)
+    heads = max_workspace // per_head if max_workspace else E * H
+    everything = (slice(None), slice(None), 0, B)
     if heads >= E * H:
-        groups = [(slice(None), slice(None))]
+        groups = [everything]
     elif heads >= H:  # whole batch elements (the mask is per batch element)
         per = heads // H
-        groups = [(slice(e, e + per), slice(None)) for e in range(0, E, per)]
-    else:  # heads of one batch element; at least one head at a time
-        per = max(heads, 1)
+        groups = [(slice(e, e + per), slice(None), 0, B) for e in range(0, E, per)]
+    elif heads >= 1:  # heads of one batch element
         groups = [
-            (slice(e, e + 1), slice(h, h + per))
+            (slice(e, e + 1), slice(h, h + heads), 0, B)
             for e in range(E)
-            for h in range(0, H, per)
+            for h in range(0, H, heads)
         ]
-    for i, (batch, head) in enumerate(groups):
+    else:  # positions of one head; multiples of 16 fill the kernels' tiles
+        per = max(max_workspace * B // per_head, 1)
+        per = per // 16 * 16 if per >= 16 else per
+        groups = [
+            (slice(e, e + 1), slice(h, h + 1), b0, min(per, B - b0))
+            for e in range(E)
+            for h in range(H)
+            for b0 in range(0, B, per)
+        ]
+    for i, (batch, head, b0, Bg) in enumerate(groups):
         mask = None if attn_mask is None else attn_mask[batch]
         _monarch_attention(
             q[batch, head],
@@ -751,6 +784,8 @@ def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Te
             pre_pad,
             make_launch(i),
             z[batch, head],
+            b0,
+            Bg,
         )
     return z
 
