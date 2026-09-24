@@ -3,6 +3,7 @@ from math import e, log2, sqrt
 import torch
 import triton
 import triton.language as tl
+from torch.library import triton_op, wrap_triton
 
 
 Tensor = torch.Tensor
@@ -72,7 +73,7 @@ def _al_cl_kernel(
     D: int,
     N: int,
     IS_FIRST_CALL: tl.constexpr,
-    qk_scale: float,
+    QK_SCALE: tl.constexpr,
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_R: tl.constexpr,
     BLOCK_C: tl.constexpr,
@@ -169,7 +170,7 @@ def _al_cl_kernel(
         k = tl.load(k_block_ptr, mask=k_mask_c[:, None] & mask_d[None, :], other=0.0)
 
         # Base-2 logits s, and p = exp2(s - max) for the chunk
-        s = qk_scale * tl.dot(ar, tl.trans(k))
+        s = QK_SCALE * tl.dot(ar, tl.trans(k))
         if not IS_FIRST_CALL:
             s = s / cr[:, None]
         s = tl.where(k_mask_c[None, :], s, float("-inf"))
@@ -217,7 +218,7 @@ def _al_cl_kernel(
     tl.store(cl_block_ptr, cl, mask=mask_r)
 
     # Store al
-    al = (qk_scale * acc_al * inv_denom[:, None]).to(ar.dtype)
+    al = (QK_SCALE * acc_al * inv_denom[:, None]).to(ar.dtype)
     al_block_ptr = (
         al_ptr
         + stride_al_e * idx_e
@@ -514,15 +515,8 @@ def _z_kernel(
         tl.store(lse_block_ptr, row_max + tl.log2(denom), mask=mask_r)
 
 
-def monarch_attention_triton(
-    q: Tensor,
-    k: Tensor,
-    v: Tensor,
-    attn_mask: Tensor | None,
-    T: int,
-    B: int,
-    pre_pad: bool,
-) -> Tensor:
+def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
+    """The kernel launches; `launch` wraps each kernel (wrap_triton in the op)."""
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 
@@ -572,7 +566,7 @@ def monarch_attention_triton(
         is_first_call = t == 0
         _ar = q if is_first_call else ar
         _ar_strides = q_strides if is_first_call else ar_strides
-        _al_cl_kernel[grid_al_cl](
+        launch(_al_cl_kernel)[grid_al_cl](
             _ar,
             *_ar_strides,
             k,
@@ -587,7 +581,7 @@ def monarch_attention_triton(
             *attn_mask_strides,
             *HMBDN,
             IS_FIRST_CALL=is_first_call,  # type: ignore
-            qk_scale=qk_scale,
+            QK_SCALE=qk_scale,  # type: ignore
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
@@ -596,7 +590,7 @@ def monarch_attention_triton(
         )
 
         if not all_blocks:
-            _z_kernel[grid_z](
+            launch(_z_kernel)[grid_z](
                 al,
                 q,
                 *q_strides,
@@ -612,7 +606,7 @@ def monarch_attention_triton(
                 **config_m,
             )
 
-        _ar_cr_kernel[grid_z](
+        launch(_ar_cr_kernel)[grid_z](
             al,
             q,
             *q_strides,
@@ -634,7 +628,7 @@ def monarch_attention_triton(
     _ar_y = q if is_first_call_y else ar
     _ar_y_strides = q_strides if is_first_call_y else ar_strides
 
-    _al_cl_kernel[grid_al_cl](
+    launch(_al_cl_kernel)[grid_al_cl](
         _ar_y,
         *_ar_y_strides,
         k,
@@ -649,7 +643,7 @@ def monarch_attention_triton(
         *attn_mask_strides,
         *HMBDN,
         IS_FIRST_CALL=is_first_call_y,  # type: ignore
-        qk_scale=qk_scale,
+        QK_SCALE=qk_scale,  # type: ignore
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
@@ -657,7 +651,7 @@ def monarch_attention_triton(
         **config_b,
     )
 
-    _z_kernel[grid_z](
+    launch(_z_kernel)[grid_z](
         al,
         q,
         *q_strides,
@@ -674,3 +668,32 @@ def monarch_attention_triton(
     )
 
     return z
+
+
+# A PyTorch custom op, so that torch.compile can trace the kernel launches (and
+# CUDA graphs can capture them). Eager calls skip it: the dispatcher adds ~40 us.
+@triton_op("ma::monarch_attention_triton", mutates_args=())
+def _monarch_attention_op(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    attn_mask: Tensor | None,
+    T: int,
+    B: int,
+    pre_pad: bool,
+) -> Tensor:
+    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, wrap_triton)
+
+
+def monarch_attention_triton(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    attn_mask: Tensor | None,
+    T: int,
+    B: int,
+    pre_pad: bool,
+) -> Tensor:
+    if torch.compiler.is_compiling():
+        return _monarch_attention_op(q, k, v, attn_mask, T, B, pre_pad)
+    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, lambda kernel: kernel)

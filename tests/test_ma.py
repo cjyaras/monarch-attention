@@ -154,3 +154,17 @@ def test_torch_triton_match_t1(E, H, N, D, B, pre_pad, dtype):
     assert torch.allclose(out_torch, out_triton, atol=atol, rtol=atol), (
         f"max diff: {(out_torch - out_triton).abs().max().item()}"
     )
+
+
+@requires_cuda
+@pytest.mark.parametrize("T", [1, 2])
+@pytest.mark.parametrize("masked", [False, True])
+def test_torch_compile(T, masked):
+    from ma import MonarchAttention, PadType
+
+    torch.manual_seed(0)
+    q, k, v = _rand_qkv(2, 4, 300, 32, torch.float16)
+    mask = _make_block_safe_mask(2, 300, 16) if masked else None
+    attn = MonarchAttention(16, T, PadType.post, impl="triton")
+    compiled = torch.compile(attn, fullgraph=True)
+    torch.testing.assert_close(compiled(q, k, v, mask), attn(q, k, v, mask))
