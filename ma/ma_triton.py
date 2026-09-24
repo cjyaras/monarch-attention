@@ -8,9 +8,13 @@ import triton.language as tl
 Tensor = torch.Tensor
 
 
-@triton.jit
-def xlogx(x):
-    return tl.where(x == 0, 0.0, x * tl.log(x))
+def _num_warps(tile: int) -> int:
+    """Warps for a program that holds a tile x tile block in registers.
+
+    Chosen by autotuning on an A100; fixed here because Triton's autotuner adds
+    per-call overhead that dominates the runtime of short sequences.
+    """
+    return 2 if tile <= 16 else 4 if tile <= 128 else 16
 
 
 @triton.jit
@@ -64,7 +68,7 @@ def _al_cl_kernel(
     B: int,
     D: int,
     N: int,
-    is_first_call: int,
+    IS_FIRST_CALL: tl.constexpr,
     sm_scale: float,
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_B: tl.constexpr,
@@ -111,13 +115,13 @@ def _al_cl_kernel(
         + stride_ar_h * idx_h
         + stride_ar_m * idx_m
         + (
-            stride_ar_b * (range_b - (pad_offset if is_first_call else 0))[:, None]
+            stride_ar_b * (range_b - (pad_offset if IS_FIRST_CALL else 0))[:, None]
             + stride_ar_d * range_d[None, :]
         )
     )
     ar = tl.load(
         ar_block_ptr,
-        mask=(pad_mask_b if is_first_call else mask_b)[:, None] & mask_d[None, :],
+        mask=(pad_mask_b if IS_FIRST_CALL else mask_b)[:, None] & mask_d[None, :],
         other=0.0,
     )
 
@@ -135,29 +139,32 @@ def _al_cl_kernel(
         other=0.0,
     )
 
-    # Load cr
-    cr_block_ptr = (
-        cr_ptr
-        + stride_cr_e * idx_e
-        + stride_cr_h * idx_h
-        + stride_cr_m * idx_m
-        + (stride_cr_b * range_b)
-    )
-    cr = tl.load(cr_block_ptr, mask=mask_b, other=1.0)
-
-    # Attention matrix
-    r = sm_scale * tl.dot(ar, tl.trans(k))
-    r = r / (cr[:, None] + EPS)
-    r = r + tl.where(k_mask_b[None, :], 0.0, float("-inf"))
-    r = tl.exp(r - tl.clamp(tl.max(r, axis=1, keep_dims=True), EPS, float("inf")))
-    r = r / (tl.sum(r, axis=1, keep_dims=True) + EPS)
+    # Attention matrix r = exp(s) / denom, with s the shifted logits
+    s = sm_scale * tl.dot(ar, tl.trans(k))
+    if not IS_FIRST_CALL:  # cr is all ones before the first _ar_cr_kernel
+        cr_block_ptr = (
+            cr_ptr
+            + stride_cr_e * idx_e
+            + stride_cr_h * idx_h
+            + stride_cr_m * idx_m
+            + (stride_cr_b * range_b)
+        )
+        cr = tl.load(cr_block_ptr, mask=mask_b, other=1.0)
+        s = s / (cr[:, None] + EPS)
+    s = s + tl.where(k_mask_b[None, :], 0.0, float("-inf"))
+    s = s - tl.clamp(tl.max(s, axis=1, keep_dims=True), EPS, float("inf"))
+    r = tl.exp(s)
+    denom = tl.sum(r, axis=1) + EPS
+    r = r * (1.0 / denom)[:, None]
     # A block whose keys are all masked has no attention weights (0 / 0 above)
     block_has_keys = tl.max(k_mask_b.to(tl.int32), axis=0) > 0
     r = tl.where(block_has_keys, r, 0.0)
 
-    # Store cl. A block whose keys are all masked gets cl = inf, which gives it
-    # zero weight when queries choose between blocks.
-    cl = tl.sum(xlogx(r), axis=1)
+    # Store cl = sum(r log r) = sum(r s) - log(denom) sum(r), which needs one log
+    # per row instead of one per entry. A block whose keys are all masked gets
+    # cl = inf, which gives it zero weight when queries choose between blocks.
+    cl = tl.sum(tl.where(k_mask_b[None, :], r * s, 0.0), axis=1)
+    cl = cl - tl.log(denom) * tl.sum(r, axis=1)
     cl = tl.where(block_has_keys, cl, float("inf"))
     cl_block_ptr = (
         cl_ptr
@@ -334,7 +341,7 @@ def _ar_cr_kernel(
     l = l - cl[:, None]
     l = l + tl.where(mask_m[:, None], 0.0, float("-inf"))
     l = tl.exp(l - tl.max(l, axis=0, keep_dims=True))
-    l = l / tl.sum(l, axis=0, keep_dims=True)
+    l = l * (1.0 / tl.sum(l, axis=0))[None, :]
     l = q_mask_m[None, :] * l
 
     # Store cr
@@ -463,7 +470,7 @@ def _z_kernel(
     l = l - cl[None, :]
     l = l + tl.where(mask_m[None, :], 0.0, float("-inf"))
     l = tl.exp(l - tl.max(l, axis=1, keep_dims=True))
-    l = l / tl.sum(l, axis=1, keep_dims=True)
+    l = l * (1.0 / tl.sum(l, axis=1))[:, None]
 
     # Load y
     y_block_ptr = (
@@ -532,7 +539,7 @@ def monarch_attention_triton(
     y = torch.empty_like(al)
     y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
 
-    cr = torch.ones(E, H, M, B, device=q.device, dtype=torch.float)
+    cr = torch.empty(E, H, M, B, device=q.device, dtype=torch.float)
     cl = torch.empty_like(cr)
 
     cr_strides = (cr.stride(0), cr.stride(1), cr.stride(2), cr.stride(3))
@@ -566,7 +573,7 @@ def monarch_attention_triton(
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
-            is_first_call=is_first_call,
+            IS_FIRST_CALL=is_first_call,  # type: ignore
             sm_scale=sm_scale,
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_B=BLOCK_B,  # type: ignore
@@ -574,6 +581,8 @@ def monarch_attention_triton(
             PRE_PAD=pre_pad,  # type: ignore
             EPS=eps,  # type: ignore
             COMPUTE_Y=False,  # type: ignore
+            num_warps=_num_warps(BLOCK_B),
+            num_stages=1,
         )
 
         _ar_cr_kernel[grid_ehb](
@@ -594,6 +603,8 @@ def monarch_attention_triton(
             BLOCK_M=BLOCK_M,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
+            num_warps=_num_warps(BLOCK_M),
+            num_stages=1,
         )
 
     is_first_call_y = T == 1
@@ -618,7 +629,7 @@ def monarch_attention_triton(
         attn_mask,
         *attn_mask_strides,
         *HMBDN,
-        is_first_call=is_first_call_y,
+        IS_FIRST_CALL=is_first_call_y,  # type: ignore
         sm_scale=sm_scale,
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
         BLOCK_B=BLOCK_B,  # type: ignore
@@ -626,6 +637,8 @@ def monarch_attention_triton(
         PRE_PAD=pre_pad,  # type: ignore
         EPS=eps,  # type: ignore
         COMPUTE_Y=True,  # type: ignore
+        num_warps=_num_warps(BLOCK_B),
+        num_stages=1,
     )
 
     z = torch.empty_like(v)
@@ -646,6 +659,8 @@ def monarch_attention_triton(
         BLOCK_M=BLOCK_M,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
+        num_warps=_num_warps(BLOCK_M),
+        num_stages=1,
     )
 
     return z
