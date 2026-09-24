@@ -1,14 +1,17 @@
+from functools import cache
 from math import e, log2, sqrt
 
 import torch
 import triton
 import triton.language as tl
+from triton import knobs
 from torch.library import triton_op, wrap_triton
 
 
 Tensor = torch.Tensor
 
 
+@cache
 def _config(n: int) -> dict:
     """Launch configuration for a softmax over n entries (keys of a block, or
     blocks), tuned on an A100 for batch sizes 1 and 8.
@@ -696,4 +699,74 @@ def monarch_attention_triton(
 ) -> Tensor:
     if torch.compiler.is_compiling():
         return _monarch_attention_op(q, k, v, attn_mask, T, B, pre_pad)
-    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, lambda kernel: kernel)
+    # Everything Triton specializes the kernels on (shapes, strides, dtypes,
+    # pointer alignment) is a function of this key
+    key = (
+        q.device,
+        q.dtype,
+        q.shape,
+        q.stride(),
+        k.stride(),
+        v.stride(),
+        T,
+        B,
+        pre_pad,
+    )
+    key += (q.data_ptr() % 16, k.data_ptr() % 16, v.data_ptr() % 16)
+    if attn_mask is not None:
+        key += (attn_mask.dtype, attn_mask.shape, attn_mask.stride())
+        key += (attn_mask.data_ptr() % 16,)
+    launch = _CachedLaunch(key, q.device.index)
+    return _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch)
+
+
+# Compiled kernel and names of its keyword arguments, per (key, launch number)
+_LAUNCH_CACHE: dict = {}
+
+
+class _CachedLaunch:
+    """Launches the kernels of one monarch_attention_triton call.
+
+    The first call with a given key goes through Triton's JIT launcher, which
+    costs ~20 us of host time per launch; later calls launch the compiled
+    kernels directly.
+    """
+
+    def __init__(self, key, device_index):
+        self.key = key
+        self.count = 0
+        self.hooks = knobs.runtime.launch_enter_hook, knobs.runtime.launch_exit_hook
+        # e.g. a profiler: go through Triton's launcher, which calls the hooks
+        self.hooked = any(hook.calls for hook in self.hooks)
+        self.stream = torch._C._cuda_getCurrentRawStream(device_index)
+
+    def __call__(self, kernel):
+        self.kernel = kernel
+        self.count += 1
+        return self
+
+    def __getitem__(self, grid):
+        self.grid = grid
+        return self._run
+
+    def _run(self, *args, **kwargs):
+        entry = _LAUNCH_CACHE.get((self.key, self.count))
+        if entry is None or self.hooked:
+            compiled = self.kernel[self.grid](*args, **kwargs)
+            names = self.kernel.arg_names[len(args) :]
+            _LAUNCH_CACHE[(self.key, self.count)] = compiled, names
+            return
+        compiled, names = entry
+        grid = self.grid
+        compiled.run(
+            grid[0],
+            grid[1],
+            1,
+            self.stream,
+            compiled.function,
+            compiled.packed_metadata,
+            None,
+            *self.hooks,
+            *args,
+            *(kwargs[name] for name in names),
+        )

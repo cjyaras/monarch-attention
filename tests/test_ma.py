@@ -168,3 +168,31 @@ def test_torch_compile(T, masked):
     attn = MonarchAttention(16, T, PadType.post, impl="triton")
     compiled = torch.compile(attn, fullgraph=True)
     torch.testing.assert_close(compiled(q, k, v, mask), attn(q, k, v, mask))
+
+
+@requires_cuda
+@pytest.mark.parametrize("T", [1, 2])
+def test_cached_launches(T):
+    """Repeat calls launch the compiled kernels directly; inputs whose pointers
+    are aligned differently must not reuse kernels specialized for alignment."""
+    from ma.ma_triton import monarch_attention_triton
+
+    torch.manual_seed(0)
+    q, k, v = _rand_qkv(2, 4, 300, 32, torch.float16)
+    mask = _make_block_safe_mask(2, 300, 16)
+    first = monarch_attention_triton(q, k, v, mask, T, 16, False)
+    torch.testing.assert_close(
+        monarch_attention_triton(q, k, v, mask, T, 16, False), first
+    )
+    # Same shapes and strides, but not 16-byte aligned
+    buffers = [
+        torch.empty(t.numel() + 1, device="cuda", dtype=t.dtype) for t in (q, k, v)
+    ]
+    unaligned = [b[1:].view_as(t).copy_(t) for b, t in zip(buffers, (q, k, v))]
+    for _ in range(2):
+        torch.testing.assert_close(
+            monarch_attention_triton(*unaligned, mask, T, 16, False), first
+        )
+        torch.testing.assert_close(
+            monarch_attention_triton(q, k, v, mask, T, 16, False), first
+        )
