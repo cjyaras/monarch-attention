@@ -38,7 +38,7 @@ Run the tests (CUDA-only tests are skipped without a GPU):
 uv run pytest
 ```
 
-Lint and format (also checked in CI):
+Lint and format:
 
 ```
 uvx ruff check .
