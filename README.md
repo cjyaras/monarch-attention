@@ -2,10 +2,6 @@
 
 Code for [MonarchAttention](https://arxiv.org/abs/2505.18698) (NeurIPS 2025).
 
-<p align="center">
-  <img width="60%" src="flash_monarch.jpg">
-</p>
-
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from the repo root:
