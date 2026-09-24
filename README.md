@@ -2,6 +2,22 @@
 
 Code for [MonarchAttention](https://arxiv.org/abs/2505.18698) (NeurIPS 2025).
 
+## Speed
+
+Forward pass of MonarchAttention's Triton kernels vs FlashAttention-2 (PyTorch's
+`scaled_dot_product_attention`) on an NVIDIA A100 80 GB: fp16, batch size 1, 12 heads, head
+dimension 64, one step (`num_steps=1`) and block size a power of two near √N.
+
+| Sequence length N | FlashAttention-2 | MonarchAttention | Speedup |
+|---:|---:|---:|---:|
+| 1,024 | 0.035 ms | 0.022 ms | 1.6x |
+| 2,048 | 0.090 ms | 0.030 ms | 3.0x |
+| 4,096 | 0.324 ms | 0.051 ms | 6.4x |
+| 8,192 | 1.243 ms | 0.104 ms | 12x |
+| 16,384 | 4.589 ms | 0.205 ms | 22x |
+
+Reproduce with [`perfbench/`](perfbench).
+
 ## Setup
 
 Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from the repo root:
