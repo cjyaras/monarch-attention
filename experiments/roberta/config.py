@@ -10,7 +10,6 @@ class CustomRobertaConfig(AttentionConfig, RobertaConfig):
 
 
 def get_config() -> CustomRobertaConfig:
-    # config = CustomRobertaConfig.from_pretrained("deepset/roberta-base-squad2")
     config = CustomRobertaConfig.from_pretrained("csarron/roberta-base-squad-v1")
     assert isinstance(config, CustomRobertaConfig)
     return config

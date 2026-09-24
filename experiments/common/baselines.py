@@ -134,29 +134,16 @@ class KernelAttention(Baseline):
 
         # --- Linear Attention Computation ---
         # 1. Compute K'^T @ V term (where K' = phi(K))
-        # Einsum: 'bhnd,bhnv->bhdv' where d=d_phi, v=head_dim
-        # kv_term = torch.einsum("bhnd,bhnv->bhdv", phi_k, value)  # (B, H, d_phi, d)
         kv_term = torch.matmul(phi_k.mT, value)
 
         # 2. Compute Q' @ (K'^T @ V) term (where Q' = phi(Q))
-        # Einsum: 'bhnd,bhdv->bhnv'
-        # output = torch.einsum("bhnd,bhdv->bhnv", phi_q, kv_term)  # (B, H, N, d)
         output = torch.matmul(phi_q, kv_term)
 
         # --- Normalization ---
         # 1. Compute K'^T @ 1s term
-        # ones_val = torch.ones(
-        #     batch_size, num_heads, seq_len, 1, device=value.device, dtype=value.dtype
-        # )
-        # Einsum: 'bhnd,bhnz->bhdz' where z=1
-        # k_one_term = torch.einsum(
-        #     "bhnd,bhnz->bhdz", phi_k, ones_val
-        # )  # (B, H, d_phi, 1)
         k_one_term = torch.sum(phi_k, dim=-2, keepdim=True).mT
 
         # 2. Compute Q' @ (K'^T @ 1s) term
-        # Einsum: 'bhnd,bhdz->bhnz'
-        # normalizer = torch.einsum("bhnd,bhdz->bhnz", phi_q, k_one_term)  # (B, H, N, 1)
         normalizer = torch.matmul(phi_q, k_one_term)
 
         # 3. Normalize output

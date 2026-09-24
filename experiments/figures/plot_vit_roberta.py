@@ -112,7 +112,6 @@ def main():
         labels=plotted_types.keys(),  # Use keys for labels with fig.legend
         loc="center left",  # Anchor point on the legend box
         bbox_to_anchor=(0.8, 0.5),
-        # fontsize="small",
     )  # Position the anchor point (x, y) relative to figure (1=right edge, 0.5=center vertically)
 
     fig.savefig("experiments/figures/vit_roberta_results.pdf", bbox_inches="tight")

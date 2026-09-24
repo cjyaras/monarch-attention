@@ -28,7 +28,6 @@ bart_colors = {
     "nystromformer": colors["nystromformer"],
     "monarch-attention": colors["monarch-attention"],
 }
-# attention_type_order = ["softmax", "nystromformer", "monarch-attention"]
 attention_type_order = ["monarch-attention", "nystromformer", "softmax"]
 
 
@@ -79,7 +78,6 @@ def main():
 
     # Markers for different configurations/settings (e.g., sequence lengths)
     markers_list = ["P", "p", "D", "s"]  # Assuming 4 points per list
-    # marker_legend_labels = [f"Setting {i+1}" for i in range(len(markers_list))]
     seq_len_labels = ["1024", "2048", "4096", "8192"]
     marker_legend_labels = [f"{sl}" for sl in seq_len_labels]
 
@@ -87,7 +85,6 @@ def main():
 
     rouge_metrics_map = [
         ("rouge_1", "ROUGE-1"),
-        # ("rouge_2", "ROUGE-2"),
         ("rouge_l", "ROUGE-L"),
     ]
 
@@ -96,7 +93,6 @@ def main():
         ax.set_xscale("log")
         ax.set_xlabel("Total Attention FLOPs")
         ax.set_ylabel(metric_name)
-        # ax.set_title(f"{metric_name} vs FLOPs")
         ax.grid(True, linestyle="--", alpha=0.6)
 
         for (
@@ -158,8 +154,6 @@ def main():
         handles=color_handles,
         loc="upper left",  # Position anchor point of the legend box
         bbox_to_anchor=(0.8, 0.7),  # Position legend box relative to figure
-        # title="Attention Method",
-        # fontsize="small",
     )
     # Add the first legend manually to the figure, so the second one doesn't overwrite it
     fig.add_artist(
@@ -172,7 +166,6 @@ def main():
         loc="lower left",  # Position anchor point of the legend box
         bbox_to_anchor=(0.825, 0.2),  # Position legend box relative to figure
         title="Sequence Length",
-        # fontsize="small",
     )
 
     fig.savefig("experiments/figures/bart_results.pdf", bbox_inches="tight")

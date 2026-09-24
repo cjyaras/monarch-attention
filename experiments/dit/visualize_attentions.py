@@ -51,7 +51,6 @@ def main():
         key_nystrom = key_nystrom[[0], layer]
 
         softmax = Softmax()
-        # monarch = MonarchAttention(16, 3, PadType.pre)
         nystrom = Nystromformer(32, 16)
 
         for head in heads:
@@ -61,7 +60,6 @@ def main():
                 .cpu()
                 .numpy()
             )
-            # monarch_matrix = monarch.get_matrix(query, key)[0, head].detach().cpu().numpy()
             nystrom_matrix = (
                 nystrom.get_matrix(query_nystrom, key_nystrom)[0, head]
                 .detach()
@@ -78,9 +76,6 @@ def main():
 
             ax[1].imshow(softmax_nystrom_matrix)
             ax[1].set_title("Softmax (first half nystrom)")
-
-            # ax[1].imshow(monarch_matrix)
-            # ax[1].set_title('Monarch')
 
             ax[2].imshow(nystrom_matrix)
             ax[2].set_title("Nystromformer")

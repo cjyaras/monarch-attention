@@ -32,9 +32,6 @@ def get_model(config: CustomRobertaConfig) -> CustomRobertaForQuestionAnswering:
     model = CustomRobertaForQuestionAnswering.from_pretrained(
         "csarron/roberta-base-squad-v1", config=config
     )
-    # model = CustomRobertaForQuestionAnswering.from_pretrained(
-    #     "deepset/roberta-base-squad2", config=config
-    # )
     model = model.to(device)  # type: ignore
     model.eval()
     return model

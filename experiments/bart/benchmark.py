@@ -66,7 +66,6 @@ def main():
         config.attention_type = AttentionType.softmax
         config.enable_flash_attention = False
         print(config.attention_type)
-        # res = evaluator.evaluate(config)
         file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
         file_names[f"softmax_{max_length}"] = file_name
@@ -78,7 +77,6 @@ def main():
         )
         config.rank = nystrom_rank
         print(config.attention_type)
-        # res = evaluator.evaluate(config)
         file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
         file_names[f"nystrom_{max_length}_rank{nystrom_rank}"] = file_name
@@ -93,7 +91,6 @@ def main():
         config.num_steps = num_steps
         config.block_size = block_size
         print(config.attention_type)
-        # res = evaluator.evaluate(config)
         file_name, res = evaluator.evaluate_and_save(config)
         print_results(res)
         file_names[f"monarch_{max_length}_b{block_size}_t{num_steps}"] = file_name

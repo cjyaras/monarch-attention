@@ -46,14 +46,6 @@ def main():
     key = torch.load("experiments/roberta/key.pt")
     attention_mask = torch.load("experiments/roberta/attention_mask.pt")
 
-    # layer = 1
-    # head = 5
-
-    # layer = 3
-    # head = 3
-
-    # layer, head = 2, 10
-
     layer, head = 5, 5
 
     seq_len = torch.sum(attention_mask[0])

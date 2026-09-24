@@ -35,21 +35,6 @@ def ablation():
         print(efficient_attn_layers)
         print(evaluator.evaluate(config))
 
-    # for i in [0, 4, 8]:
-    #     efficient_attn_layers = set(range(12)).difference(set(range(i, i + 4)))
-
-    #     config = get_config()
-    #     config.attention_type = get_mixed_type(
-    #         efficient_attn_layers,
-    #         AttentionType.monarch_attention,
-    #         AttentionType.softmax,
-    #     )
-    #     config.block_size = 24
-    #     config.pad_type = PadType.post
-    #     config.num_steps = 1
-    #     print(efficient_attn_layers)
-    #     print(evaluator.evaluate(config))
-
 
 @torch.no_grad()
 def main():
@@ -82,16 +67,6 @@ def main():
             config.num_steps = num_steps
             print(config.attention_type[0], num_steps, block_size)
             evaluator.evaluate_and_save(config)
-
-    # Linformer
-    # for rank in range(32, 192 + 1, 32):
-    #     config = get_config()
-    #     config.attention_type = get_mixed_type(
-    #         AttentionType.linformer, AttentionType.softmax
-    #     )
-    #     config.rank = rank
-    #     print(config.attention_type[0], rank)
-    #     evaluator.evaluate_and_save(config)
 
     # Performer
     for rank in range(32, 192 + 1, 32):
