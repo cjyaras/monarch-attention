@@ -93,8 +93,8 @@ def _al_cl_kernel(
     # streams over the block's keys in chunks of BLOCK_C with an online softmax.
     idx_ehm = tl.program_id(0)
     idx_eh = idx_ehm // M
-    idx_e = idx_eh // H
-    idx_h = idx_eh % H
+    idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
+    idx_h = (idx_eh % H).to(tl.int64)
     idx_m = idx_ehm % M
 
     pad_offset = M * B - N if PRE_PAD else 0
@@ -285,8 +285,8 @@ def _ar_cr_kernel(
     # and otherwise by its log-sum-exp from _z_kernel(COMPUTE_Z=False).
     idx_ehb = tl.program_id(0)
     idx_eh = idx_ehb // B
-    idx_e = idx_eh // H
-    idx_h = idx_eh % H
+    idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
+    idx_h = (idx_eh % H).to(tl.int64)
     idx_b = idx_ehb % B
 
     pad_offset = M * B - N if PRE_PAD else 0
@@ -424,8 +424,8 @@ def _z_kernel(
     # log-sum-exp over blocks, for _ar_cr_kernel.
     idx_ehb = tl.program_id(0)
     idx_eh = idx_ehb // B
-    idx_e = idx_eh // H
-    idx_h = idx_eh % H
+    idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
+    idx_h = (idx_eh % H).to(tl.int64)
     idx_b = idx_ehb % B
 
     pad_offset = M * B - N if PRE_PAD else 0
