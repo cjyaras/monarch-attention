@@ -20,6 +20,7 @@ dist/
 # Datasets, checkpoints and experiment outputs
 data/
 experiments/*/results*/
+perfbench/results/
 experiments/*/finetuned/
 experiments/dit/generations/
 experiments/dit/nystrom_attns/
