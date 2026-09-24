@@ -8,13 +8,22 @@ import triton.language as tl
 Tensor = torch.Tensor
 
 
-def _num_warps(tile: int) -> int:
-    """Warps for a program that holds a tile x tile block in registers.
+def _config(n: int) -> dict:
+    """Launch configuration for a softmax over n entries (keys of a block, or
+    blocks), tuned on an A100 for batch sizes 1 and 8.
 
-    Chosen by autotuning on an A100; fixed here because Triton's autotuner adds
-    per-call overhead that dominates the runtime of short sequences.
+    Each program takes BLOCK_R query rows, up to 128 (fewer only if that pads
+    less than 128 would), and streams over the n entries in chunks of BLOCK_C.
     """
-    return 2 if tile <= 16 else 4 if tile <= 128 else 16
+    rows = min(max(triton.next_power_of_2(n), 16), 128)
+    if n > 128 and triton.cdiv(n, 128) * 128 - n > n // 8:
+        rows = 64
+    return dict(
+        BLOCK_R=rows,
+        BLOCK_C=min(rows, 32),
+        num_warps=2 if n <= 32 else 4,
+        num_stages=2,
+    )
 
 
 @triton.jit
@@ -71,12 +80,14 @@ def _al_cl_kernel(
     IS_FIRST_CALL: tl.constexpr,
     sm_scale: float,
     HAS_ATTN_MASK: tl.constexpr,
-    BLOCK_B: tl.constexpr,
+    BLOCK_R: tl.constexpr,
+    BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
-    EPS: tl.constexpr,
     COMPUTE_Y: tl.constexpr,
 ):
+    # One program per (batch, head, block m, chunk of BLOCK_R query rows). It
+    # streams over the block's keys in chunks of BLOCK_C with an online softmax.
     idx_ehm = tl.program_id(0)
     idx_eh = idx_ehm // M
     idx_e = idx_eh // H
@@ -85,28 +96,13 @@ def _al_cl_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_b = tl.arange(0, BLOCK_B)
+    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
-    range_n = B * idx_m + range_b
+    range_n_r = B * idx_m + range_r
 
-    mask_b = range_b < B
-    pad_mask_b = mask_b & ((range_n >= pad_offset) if PRE_PAD else range_n < N)
-    k_mask_b = pad_mask_b
+    mask_r = range_r < B
+    pad_mask_r = mask_r & ((range_n_r >= pad_offset) if PRE_PAD else range_n_r < N)
     mask_d = range_d < D
-
-    if HAS_ATTN_MASK:
-        mask_block_ptr = (
-            mask_ptr
-            + stride_mask_e * idx_e
-            + stride_mask_m * idx_m
-            + stride_mask_b * (range_b - pad_offset)
-        )
-        valid_token_mask = tl.load(
-            mask_block_ptr,
-            mask=pad_mask_b,
-            other=0,
-        )
-        k_mask_b = pad_mask_b & valid_token_mask
 
     # Load ar
     ar_block_ptr = (
@@ -115,113 +111,129 @@ def _al_cl_kernel(
         + stride_ar_h * idx_h
         + stride_ar_m * idx_m
         + (
-            stride_ar_b * (range_b - (pad_offset if IS_FIRST_CALL else 0))[:, None]
+            stride_ar_b * (range_r - (pad_offset if IS_FIRST_CALL else 0))[:, None]
             + stride_ar_d * range_d[None, :]
         )
     )
     ar = tl.load(
         ar_block_ptr,
-        mask=(pad_mask_b if IS_FIRST_CALL else mask_b)[:, None] & mask_d[None, :],
+        mask=(pad_mask_r if IS_FIRST_CALL else mask_r)[:, None] & mask_d[None, :],
         other=0.0,
     )
-
-    # Load k
-    k_block_ptr = (
-        k_ptr
-        + stride_k_e * idx_e
-        + stride_k_h * idx_h
-        + stride_k_m * idx_m
-        + (stride_k_b * (range_b - pad_offset)[:, None] + stride_k_d * range_d[None, :])
-    )
-    k = tl.load(
-        k_block_ptr,
-        mask=k_mask_b[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Attention matrix r = exp(s) / denom, with s the shifted logits
-    s = sm_scale * tl.dot(ar, tl.trans(k))
     if not IS_FIRST_CALL:  # cr is all ones before the first _ar_cr_kernel
         cr_block_ptr = (
             cr_ptr
             + stride_cr_e * idx_e
             + stride_cr_h * idx_h
             + stride_cr_m * idx_m
-            + (stride_cr_b * range_b)
+            + (stride_cr_b * range_r)
         )
-        cr = tl.load(cr_block_ptr, mask=mask_b, other=1.0)
-        s = s / (cr[:, None] + EPS)
-    s = s + tl.where(k_mask_b[None, :], 0.0, float("-inf"))
-    s = s - tl.clamp(tl.max(s, axis=1, keep_dims=True), EPS, float("inf"))
-    r = tl.exp(s)
-    denom = tl.sum(r, axis=1) + EPS
-    r = r * (1.0 / denom)[:, None]
-    # A block whose keys are all masked has no attention weights (0 / 0 above)
-    block_has_keys = tl.max(k_mask_b.to(tl.int32), axis=0) > 0
-    r = tl.where(block_has_keys, r, 0.0)
+        cr = tl.load(cr_block_ptr, mask=mask_r, other=1.0)
 
-    # Store cl = sum(r log r) = sum(r s) - log(denom) sum(r), which needs one log
-    # per row instead of one per entry. A block whose keys are all masked gets
-    # cl = inf, which gives it zero weight when queries choose between blocks.
-    cl = tl.sum(tl.where(k_mask_b[None, :], r * s, 0.0), axis=1)
-    cl = cl - tl.log(denom) * tl.sum(r, axis=1)
-    cl = tl.where(block_has_keys, cl, float("inf"))
+    # Running row max, normalizer sum(exp(s - max)) and entropy numerator
+    # sum(exp(s - max) (s - max)), rescaled whenever the max grows
+    row_max = tl.full([BLOCK_R], float("-inf"), tl.float32)
+    denom = tl.zeros([BLOCK_R], tl.float32)
+    ent = tl.zeros([BLOCK_R], tl.float32)
+    acc_al = tl.zeros([BLOCK_R, BLOCK_D], tl.float32)
+    acc_y = tl.zeros([BLOCK_R, BLOCK_D], tl.float32)
+
+    for start in range(0, B, BLOCK_C):
+        range_c = start + tl.arange(0, BLOCK_C)
+        range_n_c = B * idx_m + range_c
+        mask_c = range_c < B
+        k_mask_c = mask_c & ((range_n_c >= pad_offset) if PRE_PAD else range_n_c < N)
+        if HAS_ATTN_MASK:
+            mask_block_ptr = (
+                mask_ptr
+                + stride_mask_e * idx_e
+                + stride_mask_m * idx_m
+                + stride_mask_b * (range_c - pad_offset)
+            )
+            k_mask_c = k_mask_c & tl.load(mask_block_ptr, mask=k_mask_c, other=0)
+
+        # Load k
+        k_block_ptr = (
+            k_ptr
+            + stride_k_e * idx_e
+            + stride_k_h * idx_h
+            + stride_k_m * idx_m
+            + (
+                stride_k_b * (range_c - pad_offset)[:, None]
+                + stride_k_d * range_d[None, :]
+            )
+        )
+        k = tl.load(k_block_ptr, mask=k_mask_c[:, None] & mask_d[None, :], other=0.0)
+
+        # Logits s, and p = exp(s - max) for the chunk
+        s = sm_scale * tl.dot(ar, tl.trans(k))
+        if not IS_FIRST_CALL:
+            s = s / cr[:, None]
+        s = tl.where(k_mask_c[None, :], s, float("-inf"))
+        new_max = tl.maximum(row_max, tl.max(s, axis=1))
+        # Rows whose keys so far are all masked keep a max of -inf; shift by 0
+        shift = tl.where(new_max == float("-inf"), 0.0, new_max)
+        alpha = tl.exp(row_max - shift)
+        p = tl.exp(s - shift[:, None])
+        s_shifted = tl.where(k_mask_c[None, :], s - shift[:, None], 0.0)
+        ent_shift = tl.where(denom > 0, denom * (row_max - shift), 0.0)
+        ent = alpha * (ent + ent_shift) + tl.sum(p * s_shifted, axis=1)
+        denom = alpha * denom + tl.sum(p, axis=1)
+        row_max = new_max
+        acc_al = alpha[:, None] * acc_al + tl.dot(p.to(k.dtype), k)
+
+        if COMPUTE_Y:
+            v_block_ptr = (
+                v_ptr
+                + stride_v_e * idx_e
+                + stride_v_h * idx_h
+                + stride_v_m * idx_m
+                + (
+                    stride_v_b * (range_c - pad_offset)[:, None]
+                    + stride_v_d * range_d[None, :]
+                )
+            )
+            v = tl.load(
+                v_block_ptr, mask=k_mask_c[:, None] & mask_d[None, :], other=0.0
+            )
+            acc_y = alpha[:, None] * acc_y + tl.dot(p.to(v.dtype), v)
+
+    # r = p / denom. A block whose keys are all masked (denom = 0) has no
+    # attention weights and gets cl = inf, which gives it zero weight when
+    # queries choose between blocks. cl = sum(r log r) = ent / denom - log(denom).
+    has_keys = denom > 0
+    inv_denom = tl.where(has_keys, 1.0 / denom, 0.0)
+    cl = tl.where(has_keys, ent * inv_denom - tl.log(denom), float("inf"))
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e
         + stride_cl_h * idx_h
         + stride_cl_m * idx_m
-        + (stride_cl_b * range_b)
+        + (stride_cl_b * range_r)
     )
-    tl.store(cl_block_ptr, cl, mask=mask_b)
+    tl.store(cl_block_ptr, cl, mask=mask_r)
 
     # Store al
-    al = (sm_scale * tl.dot(r.to(k.dtype), k)).to(ar.dtype)
+    al = (sm_scale * acc_al * inv_denom[:, None]).to(ar.dtype)
     al_block_ptr = (
         al_ptr
         + stride_al_e * idx_e
         + stride_al_h * idx_h
         + stride_al_m * idx_m
-        + (stride_al_b * range_b[:, None] + stride_al_d * range_d[None, :])
+        + (stride_al_b * range_r[:, None] + stride_al_d * range_d[None, :])
     )
-    tl.store(
-        al_block_ptr,
-        al,
-        mask=mask_b[:, None] & mask_d[None, :],
-    )
+    tl.store(al_block_ptr, al, mask=mask_r[:, None] & mask_d[None, :])
 
     if COMPUTE_Y:
-        # Load v
-        v_block_ptr = (
-            v_ptr
-            + stride_v_e * idx_e
-            + stride_v_h * idx_h
-            + stride_v_m * idx_m
-            + (
-                stride_v_b * (range_b - pad_offset)[:, None]
-                + stride_v_d * range_d[None, :]
-            )
-        )
-        v = tl.load(
-            v_block_ptr,
-            mask=k_mask_b[:, None] & mask_d[None, :],
-            other=0.0,
-        )
-
-        # Store y
-        y = tl.dot(r.to(v.dtype), v).to(ar.dtype)
+        y = (acc_y * inv_denom[:, None]).to(ar.dtype)
         y_block_ptr = (
             y_ptr
             + stride_y_e * idx_e
             + stride_y_h * idx_h
             + stride_y_m * idx_m
-            + (stride_y_b * range_b[:, None] + stride_y_d * range_d[None, :])
+            + (stride_y_b * range_r[:, None] + stride_y_d * range_d[None, :])
         )
-        tl.store(
-            y_block_ptr,
-            y,
-            mask=mask_b[:, None] & mask_d[None, :],
-        )
+        tl.store(y_block_ptr, y, mask=mask_r[:, None] & mask_d[None, :])
 
 
 @triton.jit
@@ -243,6 +255,7 @@ def _ar_cr_kernel(
     stride_cl_h,
     stride_cl_m,
     stride_cl_b,
+    lse_ptr,  # same layout as cl
     ar_ptr,
     stride_ar_e,
     stride_ar_h,
@@ -264,10 +277,15 @@ def _ar_cr_kernel(
     D: int,
     N: int,
     HAS_ATTN_MASK: tl.constexpr,
-    BLOCK_M: tl.constexpr,
+    BLOCK_R: tl.constexpr,
+    BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
 ):
+    # One program per (batch, head, position b, chunk of BLOCK_R blocks). Each
+    # query's softmax over blocks is normalized by its log-sum-exp from
+    # _z_kernel(COMPUTE_Z=False), so the program can stream over the queries in
+    # chunks of BLOCK_C without rescaling.
     idx_ehb = tl.program_id(0)
     idx_eh = idx_ehb // B
     idx_e = idx_eh // H
@@ -276,99 +294,87 @@ def _ar_cr_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_m = tl.arange(0, BLOCK_M)
+    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
-    range_n = idx_b + B * range_m
-
-    mask_m = range_m < M
-    q_mask_m = mask_m & (range_n >= pad_offset if PRE_PAD else range_n < N)
+    mask_r = range_r < M
     mask_d = range_d < D
 
-    if HAS_ATTN_MASK:
-        mask_block_ptr = (
-            mask_ptr
-            + stride_mask_e * idx_e
-            + stride_mask_b * (idx_b - pad_offset)
-            + stride_mask_m * range_m
-        )
-        valid_token_mask = tl.load(
-            mask_block_ptr,
-            mask=q_mask_m,
-            other=0,
-        )
-        q_mask_m = q_mask_m & valid_token_mask
-
-    # Load al
+    # Load al and cl
     al_block_ptr = (
         al_ptr
         + stride_al_e * idx_e
         + stride_al_h * idx_h
         + stride_al_b * idx_b
-        + (stride_al_m * range_m[:, None] + stride_al_d * range_d[None, :])
+        + (stride_al_m * range_r[:, None] + stride_al_d * range_d[None, :])
     )
-    al = tl.load(
-        al_block_ptr,
-        mask=mask_m[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Load q
-    q_block_ptr = (
-        q_ptr
-        + stride_q_e * idx_e
-        + stride_q_h * idx_h
-        + stride_q_b * (idx_b - pad_offset)
-        + (stride_q_m * range_m[:, None] + stride_q_d * range_d[None, :])
-    )
-    q = tl.load(
-        q_block_ptr,
-        mask=q_mask_m[:, None] & mask_d[None, :],
-        other=0.0,
-    )
-
-    # Load cl
+    al = tl.load(al_block_ptr, mask=mask_r[:, None] & mask_d[None, :], other=0.0)
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e
         + stride_cl_h * idx_h
         + stride_cl_b * idx_b
-        + (stride_cl_m * range_m)
+        + (stride_cl_m * range_r)
     )
-    cl = tl.load(cl_block_ptr, mask=mask_m, other=0.0)
+    cl = tl.load(cl_block_ptr, mask=mask_r, other=0.0)
 
-    # Attention matrix
-    l = tl.dot(al, tl.trans(q))
-    l = l - cl[:, None]
-    l = l + tl.where(mask_m[:, None], 0.0, float("-inf"))
-    l = tl.exp(l - tl.max(l, axis=0, keep_dims=True))
-    l = l * (1.0 / tl.sum(l, axis=0))[None, :]
-    l = q_mask_m[None, :] * l
+    acc_cr = tl.zeros([BLOCK_R], tl.float32)
+    acc_ar = tl.zeros([BLOCK_R, BLOCK_D], tl.float32)
 
-    # Store cr
-    cr = tl.sum(l, axis=1)
+    for start in range(0, M, BLOCK_C):
+        range_c = start + tl.arange(0, BLOCK_C)
+        range_n = idx_b + B * range_c
+        mask_c = range_c < M
+        q_mask_c = mask_c & (range_n >= pad_offset if PRE_PAD else range_n < N)
+        if HAS_ATTN_MASK:
+            mask_block_ptr = (
+                mask_ptr
+                + stride_mask_e * idx_e
+                + stride_mask_b * (idx_b - pad_offset)
+                + stride_mask_m * range_c
+            )
+            q_mask_c = q_mask_c & tl.load(mask_block_ptr, mask=q_mask_c, other=0)
+
+        # Load q and its log-sum-exp
+        q_block_ptr = (
+            q_ptr
+            + stride_q_e * idx_e
+            + stride_q_h * idx_h
+            + stride_q_b * (idx_b - pad_offset)
+            + (stride_q_m * range_c[:, None] + stride_q_d * range_d[None, :])
+        )
+        q = tl.load(q_block_ptr, mask=q_mask_c[:, None] & mask_d[None, :], other=0.0)
+        lse_block_ptr = (
+            lse_ptr
+            + stride_cl_e * idx_e
+            + stride_cl_h * idx_h
+            + stride_cl_b * idx_b
+            + (stride_cl_m * range_c)
+        )
+        lse = tl.load(lse_block_ptr, mask=mask_c, other=0.0)
+
+        # Attention matrix, normalized over blocks (rows); masked queries get 0
+        l = tl.dot(al, tl.trans(q)) - cl[:, None] - lse[None, :]
+        l = tl.where(mask_r[:, None] & q_mask_c[None, :], tl.exp(l), 0.0)
+        acc_cr += tl.sum(l, axis=1)
+        acc_ar += tl.dot(l.to(q.dtype), q)
+
+    # Store cr and ar
     cr_block_ptr = (
         cr_ptr
         + stride_cr_e * idx_e
         + stride_cr_h * idx_h
         + stride_cr_b * idx_b
-        + (stride_cr_m * range_m)
+        + (stride_cr_m * range_r)
     )
-    tl.store(cr_block_ptr, cr, mask=mask_m)
-
-    # Store ar
-    ar = tl.dot(l.to(q.dtype), q).to(al.dtype)
+    tl.store(cr_block_ptr, acc_cr, mask=mask_r)
     ar_block_ptr = (
         ar_ptr
         + stride_ar_e * idx_e
         + stride_ar_h * idx_h
         + stride_ar_b * idx_b
-        + (stride_ar_m * range_m[:, None] + stride_ar_d * range_d[None, :])
+        + (stride_ar_m * range_r[:, None] + stride_ar_d * range_d[None, :])
     )
-    tl.store(
-        ar_block_ptr,
-        ar,
-        mask=mask_m[:, None] & mask_d[None, :],
-    )
+    tl.store(ar_block_ptr, acc_ar.to(al.dtype), mask=mask_r[:, None] & mask_d[None, :])
 
 
 @triton.jit
@@ -396,6 +402,7 @@ def _z_kernel(
     stride_cl_h,
     stride_cl_m,
     stride_cl_b,
+    lse_ptr,  # same layout as cl
     z_ptr,
     stride_z_e,
     stride_z_h,
@@ -407,10 +414,16 @@ def _z_kernel(
     B: int,
     D: int,
     N: int,
-    BLOCK_M: tl.constexpr,
+    BLOCK_R: tl.constexpr,
+    BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
+    COMPUTE_Z: tl.constexpr,
 ):
+    # One program per (batch, head, position b, chunk of BLOCK_R query blocks).
+    # It streams over the blocks' al, cl and y in chunks of BLOCK_C with an
+    # online softmax. With COMPUTE_Z=False it only stores each query's
+    # log-sum-exp over blocks, for _ar_cr_kernel.
     idx_ehb = tl.program_id(0)
     idx_eh = idx_ehb // B
     idx_e = idx_eh // H
@@ -419,27 +432,13 @@ def _z_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_m = tl.arange(0, BLOCK_M)
+    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
-    range_n = idx_b + B * range_m
+    range_n = idx_b + B * range_r
 
-    mask_m = range_m < M
-    q_mask_m = mask_m & (range_n >= pad_offset if PRE_PAD else range_n < N)
+    mask_r = range_r < M
+    q_mask_r = mask_r & (range_n >= pad_offset if PRE_PAD else range_n < N)
     mask_d = range_d < D
-
-    # Load al
-    al_block_ptr = (
-        al_ptr
-        + stride_al_e * idx_e
-        + stride_al_h * idx_h
-        + stride_al_b * idx_b
-        + (stride_al_m * range_m[:, None] + stride_al_d * range_d[None, :])
-    )
-    al = tl.load(
-        al_block_ptr,
-        mask=mask_m[:, None] & mask_d[None, :],
-        other=0.0,
-    )
 
     # Load q
     q_block_ptr = (
@@ -447,59 +446,74 @@ def _z_kernel(
         + stride_q_e * idx_e
         + stride_q_h * idx_h
         + stride_q_b * (idx_b - pad_offset)
-        + (stride_q_m * range_m[:, None] + stride_q_d * range_d[None, :])
+        + (stride_q_m * range_r[:, None] + stride_q_d * range_d[None, :])
     )
-    q = tl.load(
-        q_block_ptr,
-        mask=q_mask_m[:, None] & mask_d[None, :],
-        other=0.0,
-    )
+    q = tl.load(q_block_ptr, mask=q_mask_r[:, None] & mask_d[None, :], other=0.0)
 
-    # Load cl
-    cl_block_ptr = (
-        cl_ptr
-        + stride_cl_e * idx_e
-        + stride_cl_h * idx_h
-        + stride_cl_b * idx_b
-        + (stride_cl_m * range_m)
-    )
-    cl = tl.load(cl_block_ptr, mask=mask_m, other=0.0)
+    row_max = tl.full([BLOCK_R], float("-inf"), tl.float32)
+    denom = tl.zeros([BLOCK_R], tl.float32)
+    acc = tl.zeros([BLOCK_R, BLOCK_D], tl.float32)
 
-    # Attention matrix
-    l = tl.dot(q, tl.trans(al))
-    l = l - cl[None, :]
-    l = l + tl.where(mask_m[None, :], 0.0, float("-inf"))
-    l = tl.exp(l - tl.max(l, axis=1, keep_dims=True))
-    l = l * (1.0 / tl.sum(l, axis=1))[:, None]
+    for start in range(0, M, BLOCK_C):
+        range_c = start + tl.arange(0, BLOCK_C)
+        mask_c = range_c < M
 
-    # Load y
-    y_block_ptr = (
-        y_ptr
-        + stride_y_e * idx_e
-        + stride_y_h * idx_h
-        + stride_y_b * idx_b
-        + (stride_y_m * range_m[:, None] + stride_y_d * range_d[None, :])
-    )
-    y = tl.load(
-        y_block_ptr,
-        mask=mask_m[:, None] & mask_d[None, :],
-        other=0.0,
-    )
+        # Load al, cl and y
+        al_block_ptr = (
+            al_ptr
+            + stride_al_e * idx_e
+            + stride_al_h * idx_h
+            + stride_al_b * idx_b
+            + (stride_al_m * range_c[:, None] + stride_al_d * range_d[None, :])
+        )
+        al = tl.load(al_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
+        cl_block_ptr = (
+            cl_ptr
+            + stride_cl_e * idx_e
+            + stride_cl_h * idx_h
+            + stride_cl_b * idx_b
+            + (stride_cl_m * range_c)
+        )
+        cl = tl.load(cl_block_ptr, mask=mask_c, other=0.0)
+        # Blocks whose keys are all masked have cl = inf, so s = -inf
+        s = tl.dot(q, tl.trans(al)) - cl[None, :]
+        s = tl.where(mask_c[None, :], s, float("-inf"))
+        new_max = tl.maximum(row_max, tl.max(s, axis=1))
+        shift = tl.where(new_max == float("-inf"), 0.0, new_max)
+        alpha = tl.exp(row_max - shift)
+        p = tl.exp(s - shift[:, None])
+        denom = alpha * denom + tl.sum(p, axis=1)
+        row_max = new_max
+        if COMPUTE_Z:
+            y_block_ptr = (
+                y_ptr
+                + stride_y_e * idx_e
+                + stride_y_h * idx_h
+                + stride_y_b * idx_b
+                + (stride_y_m * range_c[:, None] + stride_y_d * range_d[None, :])
+            )
+            y = tl.load(y_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
+            acc = alpha[:, None] * acc + tl.dot(p.to(y.dtype), y)
 
-    # Store z
-    z = tl.dot(l.to(y.dtype), y).to(al.dtype)
-    z_block_ptr = (
-        z_ptr
-        + stride_z_e * idx_e
-        + stride_z_h * idx_h
-        + stride_z_b * (idx_b - pad_offset)
-        + (stride_z_m * range_m[:, None] + stride_z_d * range_d[None, :])
-    )
-    tl.store(
-        z_block_ptr,
-        z,
-        mask=q_mask_m[:, None] & mask_d[None, :],
-    )
+    if COMPUTE_Z:
+        z = (acc * (1.0 / denom)[:, None]).to(q.dtype)
+        z_block_ptr = (
+            z_ptr
+            + stride_z_e * idx_e
+            + stride_z_h * idx_h
+            + stride_z_b * (idx_b - pad_offset)
+            + (stride_z_m * range_r[:, None] + stride_z_d * range_d[None, :])
+        )
+        tl.store(z_block_ptr, z, mask=q_mask_r[:, None] & mask_d[None, :])
+    else:
+        lse_block_ptr = (
+            lse_ptr
+            + stride_cl_e * idx_e
+            + stride_cl_h * idx_h
+            + stride_cl_b * idx_b
+            + (stride_cl_m * range_r)
+        )
+        tl.store(lse_block_ptr, row_max + tl.log(denom), mask=mask_r)
 
 
 def monarch_attention_triton(
@@ -510,18 +524,19 @@ def monarch_attention_triton(
     T: int,
     B: int,
     pre_pad: bool,
-    eps: float = 0.0,
 ) -> Tensor:
     E, H, N, D = q.shape
     M = triton.cdiv(N, B)
 
     HMBDN = (H, M, B, D, N)
 
-    grid_ehm = (E * H * M,)
-    grid_ehb = (E * H * B,)
+    # _al_cl_kernel: softmax over B keys, _ar_cr_kernel and _z_kernel: softmax
+    # over M blocks
+    config_b = _config(B)
+    config_m = _config(M)
+    grid_al_cl = (E * H * M, triton.cdiv(B, config_b["BLOCK_R"]))
+    grid_z = (E * H * B, triton.cdiv(M, config_m["BLOCK_R"]))
 
-    BLOCK_B = max(triton.next_power_of_2(B), 16)
-    BLOCK_M = max(triton.next_power_of_2(M), 16)
     BLOCK_D = max(triton.next_power_of_2(D), 16)
 
     sm_scale = 1 / sqrt(D)
@@ -544,6 +559,10 @@ def monarch_attention_triton(
 
     cr_strides = (cr.stride(0), cr.stride(1), cr.stride(2), cr.stride(3))
     cl_strides = (cl.stride(0), cl.stride(1), cl.stride(2), cl.stride(3))
+    lse = torch.empty_like(cl) if T > 1 else None  # read by _ar_cr_kernel
+
+    z = torch.empty_like(v)
+    z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
 
     attn_mask_strides = (
         (attn_mask.stride(0), B * attn_mask.stride(1), attn_mask.stride(1))
@@ -555,7 +574,7 @@ def monarch_attention_triton(
         is_first_call = t == 0
         _ar = q if is_first_call else ar
         _ar_strides = q_strides if is_first_call else ar_strides
-        _al_cl_kernel[grid_ehm](
+        _al_cl_kernel[grid_al_cl](
             _ar,
             *_ar_strides,
             k,
@@ -576,22 +595,39 @@ def monarch_attention_triton(
             IS_FIRST_CALL=is_first_call,  # type: ignore
             sm_scale=sm_scale,
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
-            BLOCK_B=BLOCK_B,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
-            EPS=eps,  # type: ignore
             COMPUTE_Y=False,  # type: ignore
-            num_warps=_num_warps(BLOCK_B),
-            num_stages=1,
+            **config_b,
         )
 
-        _ar_cr_kernel[grid_ehb](
+        _z_kernel[grid_z](
+            al,
+            *al_strides,
+            q,
+            *q_strides,
+            y,
+            *y_strides,
+            cl,
+            *cl_strides,
+            lse,
+            z,
+            *z_strides,
+            *HMBDN,
+            BLOCK_D=BLOCK_D,  # type: ignore
+            PRE_PAD=pre_pad,  # type: ignore
+            COMPUTE_Z=False,  # type: ignore
+            **config_m,
+        )
+
+        _ar_cr_kernel[grid_z](
             al,
             *al_strides,
             q,
             *q_strides,
             cl,
             *cl_strides,
+            lse,
             ar,
             *ar_strides,
             cr,
@@ -600,18 +636,16 @@ def monarch_attention_triton(
             *attn_mask_strides,
             *HMBDN,
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
-            BLOCK_M=BLOCK_M,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
-            num_warps=_num_warps(BLOCK_M),
-            num_stages=1,
+            **config_m,
         )
 
     is_first_call_y = T == 1
     _ar_y = q if is_first_call_y else ar
     _ar_y_strides = q_strides if is_first_call_y else ar_strides
 
-    _al_cl_kernel[grid_ehm](
+    _al_cl_kernel[grid_al_cl](
         _ar_y,
         *_ar_y_strides,
         k,
@@ -632,19 +666,13 @@ def monarch_attention_triton(
         IS_FIRST_CALL=is_first_call_y,  # type: ignore
         sm_scale=sm_scale,
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
-        BLOCK_B=BLOCK_B,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
-        EPS=eps,  # type: ignore
         COMPUTE_Y=True,  # type: ignore
-        num_warps=_num_warps(BLOCK_B),
-        num_stages=1,
+        **config_b,
     )
 
-    z = torch.empty_like(v)
-    z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
-
-    _z_kernel[grid_ehb](
+    _z_kernel[grid_z](
         al,
         *al_strides,
         q,
@@ -653,14 +681,14 @@ def monarch_attention_triton(
         *y_strides,
         cl,
         *cl_strides,
+        lse,
         z,
         *z_strides,
         *HMBDN,
-        BLOCK_M=BLOCK_M,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
-        num_warps=_num_warps(BLOCK_M),
-        num_stages=1,
+        COMPUTE_Z=True,  # type: ignore
+        **config_m,
     )
 
     return z
