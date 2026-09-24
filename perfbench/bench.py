@@ -25,7 +25,6 @@ try:
 except ImportError:  # optional: pip install flash-attn-4 (Hopper and Blackwell GPUs)
     flash_attn_4 = None
 
-SEQ_LENS = [2**i for i in range(10, 15)]  # sequence length sweep, at batch size 1
 DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
@@ -127,6 +126,12 @@ def main():
         default=256,
         help="sequence length for --sweep single",
     )
+    parser.add_argument(
+        "--max-seq-len",
+        type=int,
+        default=16384,
+        help="longest sequence length for --sweep seq_len (the paper figure: 16384)",
+    )
     parser.add_argument("--heads", type=int, default=12)
     parser.add_argument("--head-dim", type=int, default=64)
     parser.add_argument("--num-steps", type=int, default=1)
@@ -142,7 +147,8 @@ def main():
 
     configs = [("single", args.batch, args.seq_len)]
     if args.sweep == "seq_len":
-        configs = [("seq_len", args.batch, n) for n in SEQ_LENS]
+        seq_lens = [n for n in (2**i for i in range(10, 21)) if n <= args.max_seq_len]
+        configs = [("seq_len", args.batch, n) for n in seq_lens]
 
     rows = []
     for sweep, batch, seq_len in configs:

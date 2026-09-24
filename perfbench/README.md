@@ -11,8 +11,9 @@ uv run python -m perfbench.bench --sweep seq_len   # measure, write perfbench/re
 uv run python -m perfbench.plot                    # figures next to the CSV
 ```
 
-- `--sweep seq_len`: sequence lengths 1024 to 16384 at batch size `--batch` (1), producing
-  the paper figure `normalized_attention_runtime.pdf` and absolute runtimes.
+- `--sweep seq_len`: sequence lengths 1024 to 16384 (or `--max-seq-len`) at batch size
+  `--batch` (1), producing the paper figure `normalized_attention_runtime.pdf` and absolute
+  runtimes.
 - `--sweep single` (default): one configuration, set with `--batch` and `--seq-len`.
 
 Also configurable: `--heads` (12), `--head-dim` (64), `--num-steps` (1) and `--dtype`
