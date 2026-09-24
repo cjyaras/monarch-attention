@@ -76,6 +76,7 @@ def _al_cl_kernel(
     B: int,
     D: int,
     N: int,
+    NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     IS_FIRST_CALL: tl.constexpr,
     QK_SCALE: tl.constexpr,
     HAS_ATTN_MASK: tl.constexpr,
@@ -96,7 +97,9 @@ def _al_cl_kernel(
     stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
     # One program per (batch, head, block m, chunk of BLOCK_R query rows). It
     # streams over the block's keys in chunks of BLOCK_C with an online softmax.
-    idx_ehm = tl.program_id(0)
+    # A block's chunks are consecutive programs, so they share its keys in L2.
+    idx_ehm = tl.program_id(0) // NUM_CHUNKS
+    idx_chunk = tl.program_id(0) % NUM_CHUNKS
     idx_eh = idx_ehm // M
     idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
     idx_h = (idx_eh % H).to(tl.int64)
@@ -104,7 +107,7 @@ def _al_cl_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
+    range_r = idx_chunk * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
     range_n_r = B * idx_m + range_r
 
@@ -266,6 +269,7 @@ def _ar_cr_kernel(
     B: int,
     D: int,
     N: int,
+    NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_R: tl.constexpr,
     BLOCK_C: tl.constexpr,
@@ -287,8 +291,10 @@ def _ar_cr_kernel(
     # One program per (batch, head, position b, chunk of BLOCK_R blocks). It
     # streams over the queries in chunks of BLOCK_C. Each query's softmax over
     # blocks is normalized directly if the program holds all blocks (ALL_BLOCKS),
-    # and otherwise by its log-sum-exp from _z_kernel(COMPUTE_Z=False).
-    idx_ehb = tl.program_id(0)
+    # and otherwise by its log-sum-exp from _z_kernel(COMPUTE_Z=False). A
+    # position's chunks are consecutive programs, so they share its queries in L2.
+    idx_ehb = tl.program_id(0) // NUM_CHUNKS
+    idx_chunk = tl.program_id(0) % NUM_CHUNKS
     idx_eh = idx_ehb // B
     idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
     idx_h = (idx_eh % H).to(tl.int64)
@@ -296,7 +302,7 @@ def _ar_cr_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
+    range_r = idx_chunk * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
     mask_r = range_r < M
     mask_d = range_d < D
@@ -409,6 +415,7 @@ def _z_kernel(
     B: int,
     D: int,
     N: int,
+    NUM_CHUNKS: tl.constexpr,  # of BLOCK_R rows; a constant, so // and % are cheap
     BLOCK_R: tl.constexpr,
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
@@ -426,8 +433,10 @@ def _z_kernel(
     # One program per (batch, head, position b, chunk of BLOCK_R query blocks).
     # It streams over the blocks' al, cl and y in chunks of BLOCK_C with an
     # online softmax. With COMPUTE_Z=False it only stores each query's
-    # log-sum-exp over blocks, for _ar_cr_kernel.
-    idx_ehb = tl.program_id(0)
+    # log-sum-exp over blocks, for _ar_cr_kernel. A position's chunks are
+    # consecutive programs, so they share its al, cl and y in L2.
+    idx_ehb = tl.program_id(0) // NUM_CHUNKS
+    idx_chunk = tl.program_id(0) % NUM_CHUNKS
     idx_eh = idx_ehb // B
     idx_e = (idx_eh // H).to(tl.int64)  # 64-bit offsets for inputs over 2^31 elements
     idx_h = (idx_eh % H).to(tl.int64)
@@ -435,7 +444,7 @@ def _z_kernel(
 
     pad_offset = M * B - N if PRE_PAD else 0
 
-    range_r = tl.program_id(1) * BLOCK_R + tl.arange(0, BLOCK_R)
+    range_r = idx_chunk * BLOCK_R + tl.arange(0, BLOCK_R)
     range_d = tl.arange(0, BLOCK_D)
     range_n = idx_b + B * range_r
 
@@ -530,8 +539,10 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
     # over M blocks
     config_b = _config(B, blocks=False)
     config_m = _config(M, blocks=True)
-    grid_al_cl = (E * H * M, triton.cdiv(B, config_b["BLOCK_R"]))
-    grid_z = (E * H * B, triton.cdiv(M, config_m["BLOCK_R"]))
+    chunks_b = triton.cdiv(B, config_b["BLOCK_R"])
+    chunks_m = triton.cdiv(M, config_m["BLOCK_R"])
+    grid_al_cl = (E * H * M * chunks_b, 1)
+    grid_z = (E * H * B * chunks_m, 1)
 
     BLOCK_D = max(triton.next_power_of_2(D), 16)
 
@@ -584,6 +595,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
+            NUM_CHUNKS=chunks_b,  # type: ignore
             IS_FIRST_CALL=is_first_call,  # type: ignore
             QK_SCALE=qk_scale,  # type: ignore
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
@@ -604,6 +616,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
                 z,
                 *z_strides,
                 *HMBDN,
+                NUM_CHUNKS=chunks_m,  # type: ignore
                 BLOCK_D=BLOCK_D,  # type: ignore
                 PRE_PAD=pre_pad,  # type: ignore
                 COMPUTE_Z=False,  # type: ignore
@@ -621,6 +634,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
+            NUM_CHUNKS=chunks_m,  # type: ignore
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
@@ -646,6 +660,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
         attn_mask,
         *attn_mask_strides,
         *HMBDN,
+        NUM_CHUNKS=chunks_b,  # type: ignore
         IS_FIRST_CALL=is_first_call_y,  # type: ignore
         QK_SCALE=qk_scale,  # type: ignore
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
@@ -665,6 +680,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
         z,
         *z_strides,
         *HMBDN,
+        NUM_CHUNKS=chunks_m,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
         COMPUTE_Z=True,  # type: ignore
