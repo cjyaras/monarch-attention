@@ -58,7 +58,7 @@ export SCRIPT_ARGS=" \
 --predict_with_generate \
 "
 # change --num_processes for different number of GPUs.
-accelerate launch --num_processes 2 --main_process_port 29551 experiments/bart/run_summarization.py $SCRIPT_ARGS
+uv run accelerate launch --num_processes 2 --main_process_port 29551 -m experiments.bart.run_summarization $SCRIPT_ARGS
 ```
 
 ## Fine-tuning BART with `monarchattention`
@@ -110,7 +110,7 @@ export SCRIPT_ARGS=" \
 --num_steps ${NUM_STEPS}
 "
 # change --num_processes for different number of GPUs.
-accelerate launch --num_processes 2 --main_process_port 29551 experiments/bart/run_summarization.py $SCRIPT_ARGS
+uv run accelerate launch --num_processes 2 --main_process_port 29551 -m experiments.bart.run_summarization $SCRIPT_ARGS
 ```
 
 ## Evaluation

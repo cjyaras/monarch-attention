@@ -7,8 +7,10 @@ Testing Monarch Attention on image classification using [ViT-base](https://huggi
 Run benchmarks across attention mechanisms:
 
 ```bash
-python -m experiments.vit.benchmark
+uv run python -m experiments.vit.benchmark
 ```
+
+`--ablation` instead compares Monarch's padding placed before vs. after the sequence (block size 14, 2 steps) and prints the results without saving them.
 
 Results are saved as JSON files in `experiments/vit/results/`. The script evaluates:
 
@@ -26,7 +28,7 @@ Evaluation uses 1024 samples with batch size 8, measuring top-5 accuracy.
 Generate the accuracy vs. FLOPs figure (combined with RoBERTa results):
 
 ```bash
-python -m experiments.figures.plot_vit_roberta
+uv run python -m experiments.figures.plot_vit_roberta
 ```
 
 Output: `experiments/figures/vit_roberta_results.pdf`
@@ -38,7 +40,7 @@ This produces a two-panel figure with ViT top-5 accuracy (left) and RoBERTa F1 (
 Generate attention map comparisons across mechanisms:
 
 ```bash
-python -m experiments.vit.visualize_attentions
+uv run python -m experiments.vit.visualize_attentions
 ```
 
 Output: `experiments/figures/attention_maps.pdf`

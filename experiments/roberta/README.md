@@ -7,8 +7,10 @@ Testing Monarch Attention on extractive question answering using [RoBERTa-base f
 Run benchmarks across attention mechanisms:
 
 ```bash
-python -m experiments.roberta.benchmark
+uv run python -m experiments.roberta.benchmark
 ```
+
+`--ablation` instead replaces one layer at a time with Monarch attention (block size 24, 1 step) and prints the results without saving them.
 
 Results are saved as JSON files in `experiments/roberta/results/`. The script evaluates:
 
@@ -26,7 +28,7 @@ Evaluation uses 1024 samples with batch size 8.
 Generate the F1 vs. FLOPs figure (combined with ViT results):
 
 ```bash
-python -m experiments.figures.plot_vit_roberta
+uv run python -m experiments.figures.plot_vit_roberta
 ```
 
 Output: `experiments/figures/vit_roberta_results.pdf`
@@ -38,7 +40,7 @@ This produces a two-panel figure with ViT top-5 accuracy (left) and RoBERTa F1 (
 Generate attention map comparisons across mechanisms:
 
 ```bash
-python -m experiments.roberta.visualize_attentions
+uv run python -m experiments.roberta.visualize_attentions
 ```
 
 Output: `experiments/figures/roberta_attention_maps.pdf`

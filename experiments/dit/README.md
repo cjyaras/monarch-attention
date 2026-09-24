@@ -7,7 +7,7 @@ Testing Monarch Attention on class-conditional image generation using the [DiT-X
 `benchmark_flops.py` measures the floating-point operations for a single generation step across attention mechanisms.
 
 ```bash
-python -m experiments.dit.benchmark_flops \
+uv run python -m experiments.dit.benchmark_flops \
     --attention_type monarch \
     --monarch_block_size 16 \
     --monarch_num_steps 3 \
@@ -30,7 +30,7 @@ Key arguments:
 `sample_fid.py` generates 50K images for FID evaluation, saving batches as `.npz` files.
 
 ```bash
-python -m experiments.dit.sample_fid \
+uv run python -m experiments.dit.sample_fid \
     --attention_type monarch \
     --monarch_block_size 16 \
     --monarch_num_steps 3 \
@@ -54,7 +54,7 @@ Key arguments are the same as `benchmark_flops.py`, plus:
 `visualize_examples.py` generates a grid of sample images for visual comparison.
 
 ```bash
-python -m experiments.dit.visualize_examples \
+uv run python -m experiments.dit.visualize_examples \
     --attention_type monarch \
     --monarch_block_size 16 \
     --monarch_num_steps 3 \
