@@ -78,8 +78,8 @@ class EfficientAttnProcessor(AttnProcessor2_0):
         if attn.norm_k is not None:
             key = attn.norm_k(key)
 
-        # the output of sdp = (batch, num_heads, seq_len, head_dim)
-        # TODO: add support for attn.scale when we move to Torch 2.1
+        # (batch, num_heads, seq_len, head_dim). attn_module applies the default
+        # 1/sqrt(head_dim) scaling, which is what DiT's attention layers use.
         hidden_states = self.attn_module(query, key, value, attention_mask)
 
         hidden_states = hidden_states.transpose(1, 2).reshape(

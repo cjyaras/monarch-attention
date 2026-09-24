@@ -51,7 +51,12 @@ Run the ViT benchmark:
 uv run python -m experiments.vit.benchmark
 ```
 
-See the READMEs in [`experiments/`](experiments) for the other benchmarks.
+See the READMEs in [`experiments/`](experiments) for the other benchmarks, and
+[`perfbench/`](perfbench) for runtime comparisons against FlashAttention-2.
+
+## License
+
+Academic research and education use only; see [`LICENSE`](LICENSE).
 
 ## Citation
 
