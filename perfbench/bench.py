@@ -11,7 +11,6 @@ import argparse
 import csv
 import os
 import socket
-from math import sqrt
 
 import torch
 import torch.nn.functional as F
@@ -22,6 +21,12 @@ from ma.ma_triton import monarch_attention_triton
 
 SEQ_LENS = [2**i for i in range(10, 15)]  # sequence length sweep, at batch size 1
 DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
+
+
+def block_size_for(seq_len: int) -> int:
+    """Power of two near sqrt(seq_len). The kernels pad blocks to powers of two,
+    so e.g. B = 45 for N = 2048 would do the work of B = 64."""
+    return 2 ** (seq_len.bit_length() - 1 >> 1)
 
 
 def measure(fn, profile: str) -> tuple[float, float]:
@@ -56,7 +61,7 @@ def benchmark(batch: int, seq_len: int, args) -> list[dict]:
         )
         for _ in range(3)
     )
-    block_size = int(sqrt(seq_len))
+    block_size = block_size_for(seq_len)
 
     def monarch(q=q, k=k, v=v):
         return monarch_attention_triton(

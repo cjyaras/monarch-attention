@@ -43,6 +43,8 @@ class MonarchAttention(nn.Module):
 
     Args:
         block_size: Monarch block size B; sequences are padded to a multiple of it.
+            The Triton kernels are fastest when both B and seq_len / B are powers
+            of two.
         num_steps: number of alternating optimization steps T.
         pad_type: whether padding goes before (`pre`) or after (`post`) the sequence.
         impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels). The Triton
