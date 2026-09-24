@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from enum import StrEnum
 
 import torch
@@ -14,6 +15,23 @@ except ModuleNotFoundError as e:  # Triton isn't available on every platform
 
 IMPLEMENTATIONS = {"torch": monarch_attention_torch, "triton": monarch_attention_triton}
 
+_impl_override: str | None = None
+
+
+@contextmanager
+def override_impl(impl: str):
+    """Run every MonarchAttention with `impl` inside this context.
+
+    E.g. `override_impl("torch")` for FLOP counting, which can't see inside
+    Triton kernels.
+    """
+    global _impl_override
+    previous, _impl_override = _impl_override, impl
+    try:
+        yield
+    finally:
+        _impl_override = previous
+
 
 class PadType(StrEnum):
     pre = "pre"
@@ -27,11 +45,12 @@ class MonarchAttention(nn.Module):
         block_size: Monarch block size B; sequences are padded to a multiple of it.
         num_steps: number of alternating optimization steps T.
         pad_type: whether padding goes before (`pre`) or after (`post`) the sequence.
-        impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels).
+        impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels). The Triton
+            kernels slow down sharply beyond ~128 blocks (seq_len / block_size).
 
     `forward(query, key, value, attention_mask=None)` takes tensors of shape
-    (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask with
-    1 for tokens to keep, and returns (batch, heads, seq_len, head_dim).
+    (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask that
+    is nonzero for tokens to keep, and returns (batch, heads, seq_len, head_dim).
     """
 
     def __init__(self, block_size: int, num_steps: int, pad_type: PadType, impl: str = "torch"):
@@ -42,10 +61,13 @@ class MonarchAttention(nn.Module):
         self.block_size = block_size
         self.num_steps = num_steps
         self.pad_type = pad_type
-        self._impl_fn = IMPLEMENTATIONS[impl]
+        self.impl = impl
 
     def forward(self, query, key, value, attention_mask=None):
-        return self._impl_fn(
+        impl_fn = IMPLEMENTATIONS[_impl_override or self.impl]
+        if attention_mask is not None:
+            attention_mask = attention_mask.bool()
+        return impl_fn(
             query,
             key,
             value,

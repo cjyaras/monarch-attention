@@ -9,6 +9,7 @@ fall back to standard SDPA attention.
 
 from enum import StrEnum
 
+import torch
 import torch.nn as nn
 from transformers import AttentionInterface
 from transformers.integrations.sdpa_attention import sdpa_attention_forward
@@ -80,7 +81,8 @@ def get_attn_module(config, layer_num: int | None = None) -> nn.Module:
         case AttentionType.softmax:
             args = (config.enable_flash_attention,)
         case AttentionType.monarch_attention:
-            args = (config.block_size, config.num_steps, config.pad_type)
+            impl = "triton" if torch.cuda.is_available() else "torch"
+            args = (config.block_size, config.num_steps, config.pad_type, impl)
         case (
             AttentionType.linformer
             | AttentionType.performer

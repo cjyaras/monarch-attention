@@ -6,6 +6,8 @@ from torch.utils.flop_counter import FlopCounterMode
 from transformers.image_processing_base import BatchFeature
 from transformers.tokenization_utils_base import BatchEncoding
 
+from ma import override_impl
+
 T = TypeVar("T")
 
 Tensor = torch.Tensor
@@ -52,7 +54,10 @@ def attention_bmm_flops(model, module_names: list[str], run) -> int:
         module = model.get_submodule(name)
         handles += [module.register_forward_pre_hook(start), module.register_forward_hook(stop)]
     try:
-        run()
+        # FLOP counters can't see inside Triton kernels; the torch implementation
+        # performs the same matmuls
+        with override_impl("torch"):
+            run()
     finally:
         for handle in handles:
             handle.remove()
