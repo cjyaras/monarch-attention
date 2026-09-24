@@ -36,6 +36,20 @@ def _config(n: int, blocks: bool) -> dict:
     )
 
 
+@cache
+def _z_config(n: int) -> dict:
+    """_z_kernel's configuration: _config's, but from 90 to 255 blocks with at
+    most 168 registers per thread, which fits a third program per SM (+2-7% on
+    an A100 SXM and an H100). Caps help only some shapes, so not elsewhere."""
+    config = _config(n, blocks=True)
+    if 90 <= n < 256:
+        rows = config["BLOCK_R"]
+        config = config | dict(
+            BLOCK_C=32 if rows == 128 else 64, num_stages=3, maxnreg=168
+        )
+    return config
+
+
 @triton.jit
 def _strides_mb(H, M, B, D):
     """Strides (e, h, m, b, d) of a contiguous (E, H, M, B, D) tensor."""
@@ -544,6 +558,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
     # over M blocks
     config_b = _config(B, blocks=False)
     config_m = _config(M, blocks=True)
+    config_z = _z_config(M)  # same tiles as config_m
     chunks_b = triton.cdiv(B, config_b["BLOCK_R"])
     chunks_m = triton.cdiv(M, config_m["BLOCK_R"])
     grid_al_cl = (E * H * M * chunks_b, 1)
@@ -625,7 +640,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
                 BLOCK_D=BLOCK_D,  # type: ignore
                 PRE_PAD=pre_pad,  # type: ignore
                 COMPUTE_Z=False,  # type: ignore
-                **config_m,
+                **config_z,
             )
 
         launch(_ar_cr_kernel)[grid_z](
@@ -689,7 +704,7 @@ def _monarch_attention(q, k, v, attn_mask, T, B, pre_pad, launch) -> Tensor:
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
         COMPUTE_Z=True,  # type: ignore
-        **config_m,
+        **config_z,
     )
 
     return z
