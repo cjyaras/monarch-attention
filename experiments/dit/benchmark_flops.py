@@ -6,6 +6,7 @@ import numpy as np
 
 
 from experiments.common.attention import AttentionType
+from experiments.common.utils import attention_bmm_flops
 from experiments.dit.pipeline import get_pipeline, CustomDiTPipeline
 
 
@@ -19,8 +20,6 @@ def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_la
     return attn_dict
 
 def benchmark_flops(pipe: CustomDiTPipeline, num_classes: int, num_samples: int, num_inference_steps: int, cfg_scale: float):
-    from torchtnt.utils.flops import FlopTensorDispatchMode
-    
     # Classes to generate
     class_ids = np.random.choice(np.arange(num_classes), size=num_samples)
 
@@ -30,11 +29,11 @@ def benchmark_flops(pipe: CustomDiTPipeline, num_classes: int, num_samples: int,
 
     latents = torch.randn(num_samples, latent_channels, latent_size, latent_size)
 
-    with FlopTensorDispatchMode(pipe.transformer.transformer_blocks[0].attn1.processor.attn_module) as ftdm:
-        _ = pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type="numpy", guidance_scale=cfg_scale)
-        #print(ftdm.flop_counts)
-        flops = ftdm.flop_counts["attn1"]["bmm.default"]
-        return flops
+    return attention_bmm_flops(
+        pipe.transformer,
+        ["transformer_blocks.0.attn1"],
+        lambda: pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type="numpy", guidance_scale=cfg_scale),
+    )
 
 
 def parse_args():

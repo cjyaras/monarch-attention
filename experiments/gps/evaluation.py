@@ -1,6 +1,7 @@
 import torch
 
 from experiments.common.logging import Logger
+from experiments.common.utils import attention_bmm_flops
 from experiments.gps.config import CustomGPSConfig
 from experiments.gps.data import ActorData, get_processed_dataset
 from experiments.gps.model import GPSModel, get_model
@@ -23,11 +24,11 @@ class Evaluator:
         self.logger = Logger(save_dir)
 
     def benchmark_flops(self, model: GPSModel):
-        from torchtnt.utils.flops import FlopTensorDispatchMode
-
-        with FlopTensorDispatchMode(model) as ftdm:
-            model(self.data.node_features, self.data.edge_index)
-            return ftdm.flop_counts["backbone.0.attn"]["bmm.default"]
+        return attention_bmm_flops(
+            model,
+            ["backbone.0.attn"],
+            lambda: model(self.data.node_features, self.data.edge_index),
+        )
 
     def evaluate(self, config: CustomGPSConfig) -> dict[str, float]:
         model = get_model(config)

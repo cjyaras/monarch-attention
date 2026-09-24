@@ -27,8 +27,6 @@ experiments = [
     "matplotlib",
     "torchvision",
     "torch_geometric",
-    "torchtnt",
-    "setuptools<81",  # torchtnt imports pkg_resources
     "transformers>=5",
     "diffusers",
     "datasets",

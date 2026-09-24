@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from typing import Dict, List, TypeVar
 
 import torch
+from torch.utils.flop_counter import FlopCounterMode
 from transformers.image_processing_base import BatchFeature
 from transformers.tokenization_utils_base import BatchEncoding
 
@@ -32,12 +33,32 @@ def batches(dataset, batch_size: int):
 
 
 def attention_bmm_flops(model, module_names: list[str], run) -> int:
-    """bmm FLOPs spent inside the named attention modules while calling `run()`."""
-    from torchtnt.utils.flops import FlopTensorDispatchMode
+    """Batched-matmul FLOPs inside the named submodules of `model` while calling `run()`.
 
-    with FlopTensorDispatchMode(model) as ftdm:
+    Counted as multiply-accumulates (half of torch's FLOP count), the convention
+    of torchtnt, which produced the reported numbers.
+    """
+    counters = []
+
+    def start(module, args):
+        counters.append(FlopCounterMode(display=False))
+        counters[-1].__enter__()
+
+    def stop(module, args, output):
+        counters[-1].__exit__(None, None, None)
+
+    handles = []
+    for name in module_names:
+        module = model.get_submodule(name)
+        handles += [module.register_forward_pre_hook(start), module.register_forward_hook(stop)]
+    try:
         run()
-        return sum(ftdm.flop_counts[name]["bmm.default"] for name in module_names)
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    total = sum(c.get_flop_counts()["Global"].get(torch.ops.aten.bmm, 0) for c in counters)
+    return total // 2
 
 
 @contextmanager
