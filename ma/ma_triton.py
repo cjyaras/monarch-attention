@@ -15,19 +15,24 @@ Tensor = torch.Tensor
 def _config(n: int, blocks: bool) -> dict:
     """Launch configuration for a softmax over n entries: the keys of a block
     (_al_cl_kernel) or the blocks (`blocks`: _ar_cr_kernel, _z_kernel), tuned on
-    an A100 SXM for batch sizes 1 and 8.
+    an A100 SXM and an H100 for batch sizes 1 and 8.
 
-    Each program takes BLOCK_R query rows, up to 128 (for keys, 64 if 128 would
-    pad much more), and streams over the n entries in chunks of BLOCK_C.
+    Each program takes BLOCK_R query rows and streams over the n entries in
+    chunks of BLOCK_C. Rows are capped at 128 (64 if 128 would pad much more,
+    and 64 for the keys of blocks of 90 to 255: the smaller tiles let more warps
+    hide memory latency). For n >= 90, deeper pipelining keeps more loads in
+    flight: 3 stages for 128-row tiles, 4 for 64-row tiles.
     """
     rows = min(max(triton.next_power_of_2(n), 16), 128)
-    if not blocks and n > 128 and triton.cdiv(n, 128) * 128 - n > n // 8:
+    if n > 128 and triton.cdiv(n, 128) * 128 - n > n // 8:
+        rows = 64
+    if not blocks and 90 <= n < 256:
         rows = 64
     return dict(
         BLOCK_R=rows,
-        BLOCK_C=min(rows, 64 if n >= 128 else 32),
+        BLOCK_C=min(rows, 64 if rows == 128 and n >= 128 else 32),
         num_warps=2 if n <= 32 else 4,
-        num_stages=2,
+        num_stages=2 if n < 90 else (3 if rows == 128 else 4),
     )
 
 
