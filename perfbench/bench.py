@@ -24,8 +24,7 @@ DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16}
 
 
 def block_size_for(seq_len: int) -> int:
-    """Power of two near sqrt(seq_len). The kernels pad blocks to powers of two,
-    so e.g. B = 45 for N = 2048 would do the work of B = 64."""
+    """Power of two near sqrt(seq_len), which the kernels' tiles divide evenly."""
     return 2 ** (seq_len.bit_length() - 1 >> 1)
 
 

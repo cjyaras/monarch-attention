@@ -13,9 +13,9 @@ uv run python -m perfbench.plot                    # figures next to the CSV
 - `--sweep single` (default): one configuration, set with `--batch` and `--seq-len`.
 
 Also configurable: `--heads` (12), `--head-dim` (64), `--num-steps` (1) and `--dtype`
-(`fp16`, `bf16`). Monarch uses a power-of-two block size near √N
-(the kernels pad the block size and the number of blocks to powers of two). Before timing, each configuration checks the
-kernel against the torch reference implementation. The CSV records runtime (ms) and peak
+(`fp16`, `bf16`). Monarch uses a power-of-two block size near √N, which the kernels' tiles
+divide evenly. Before timing, each configuration checks the kernel against the torch
+reference implementation. The CSV records runtime (ms) and peak
 GPU memory (MB), with the GPU and host: absolute runtimes can differ by 2x between nodes with
 the same GPU model, so compare methods within one run.
 

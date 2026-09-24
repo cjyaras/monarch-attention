@@ -77,6 +77,10 @@ MASK_PARAMS = [
     (2, 4, 32, 32, 8, 2, False, torch.float16),
     (1, 1, 16, 16, 4, 2, True, torch.bfloat16),
     (2, 4, 16, 32, 4, 2, False, torch.bfloat16),
+    # Blocks longer than one key chunk
+    (1, 2, 2000, 32, 90, 2, False, torch.float16),
+    # More blocks than one program holds: _ar_cr_kernel uses _z_kernel's log-sum-exp
+    (1, 2, 4500, 32, 16, 2, True, torch.float16),
 ]
 
 

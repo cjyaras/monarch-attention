@@ -43,12 +43,12 @@ class MonarchAttention(nn.Module):
 
     Args:
         block_size: Monarch block size B; sequences are padded to a multiple of it.
-            The Triton kernels are fastest when both B and seq_len / B are powers
-            of two.
+            The Triton kernels work on tiles of 16 to 128 entries, so they are
+            fastest when B and seq_len / B are powers of two (e.g. B = 181 for
+            seq_len = 32768 takes ~1.4x as long as B = 128 on an A100).
         num_steps: number of alternating optimization steps T.
         pad_type: whether padding goes before (`pre`) or after (`post`) the sequence.
-        impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels). The Triton
-            kernels slow down sharply beyond ~128 blocks (seq_len / block_size).
+        impl: `"torch"` (reference) or `"triton"` (fused CUDA kernels).
 
     `forward(query, key, value, attention_mask=None)` takes tensors of shape
     (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask that
