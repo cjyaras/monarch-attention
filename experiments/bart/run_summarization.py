@@ -40,20 +40,37 @@ class ScriptArguments:
     text_column: str = "chapter"
     summary_column: str = "summary_text"
     trust_remote_code: bool = False
-    max_source_length: int = field(default=1024, metadata={"help": "Inputs are truncated to this many tokens."})
-    max_target_length: int = field(default=128, metadata={"help": "Summaries are truncated to this many tokens."})
+    max_source_length: int = field(
+        default=1024, metadata={"help": "Inputs are truncated to this many tokens."}
+    )
+    max_target_length: int = field(
+        default=128, metadata={"help": "Summaries are truncated to this many tokens."}
+    )
     max_train_samples: Optional[int] = None
     max_eval_samples: Optional[int] = None
-    num_beams: int = field(default=1, metadata={"help": "Beams for generation during evaluation."})
+    num_beams: int = field(
+        default=1, metadata={"help": "Beams for generation during evaluation."}
+    )
     ignore_pad_token_for_loss: bool = True
-    attention_type: str = field(default="softmax", metadata={"help": "See experiments/common/attention.py:AttentionType."})
-    num_steps: Optional[int] = field(default=None, metadata={"help": "Monarch attention steps."})
-    block_size: Optional[int] = field(default=None, metadata={"help": "Monarch attention block size."})
-    attention_rank: Optional[int] = field(default=None, metadata={"help": "Rank for low-rank baselines."})
+    attention_type: str = field(
+        default="softmax",
+        metadata={"help": "See experiments/common/attention.py:AttentionType."},
+    )
+    num_steps: Optional[int] = field(
+        default=None, metadata={"help": "Monarch attention steps."}
+    )
+    block_size: Optional[int] = field(
+        default=None, metadata={"help": "Monarch attention block size."}
+    )
+    attention_rank: Optional[int] = field(
+        default=None, metadata={"help": "Rank for low-rank baselines."}
+    )
 
 
 def main():
-    args, training_args = HfArgumentParser((ScriptArguments, Seq2SeqTrainingArguments)).parse_args_into_dataclasses()
+    args, training_args = HfArgumentParser(
+        (ScriptArguments, Seq2SeqTrainingArguments)
+    ).parse_args_into_dataclasses()
 
     logging.basicConfig(
         format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -69,7 +86,7 @@ def main():
 
     try:
         nltk.data.find("tokenizers/punkt_tab")
-    except (LookupError, OSError):
+    except LookupError, OSError:
         with FileLock(".lock"):
             nltk.download("punkt_tab", quiet=True)
 
@@ -84,7 +101,9 @@ def main():
         block_size=args.block_size,
         rank=args.attention_rank,
     )
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=args.trust_remote_code)
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name_or_path, trust_remote_code=args.trust_remote_code
+    )
     model = CustomBartForConditionalGeneration.from_pretrained(
         args.model_name_or_path, config=config, trust_remote_code=args.trust_remote_code
     )
@@ -97,10 +116,18 @@ def main():
         model.resize_position_embeddings(args.max_source_length)
 
     def preprocess(examples):
-        pairs = [(t, s) for t, s in zip(examples[args.text_column], examples[args.summary_column]) if t and s]
+        pairs = [
+            (t, s)
+            for t, s in zip(examples[args.text_column], examples[args.summary_column])
+            if t and s
+        ]
         inputs, targets = [t for t, _ in pairs], [s for _, s in pairs]
-        model_inputs = tokenizer(inputs, max_length=args.max_source_length, truncation=True)
-        labels = tokenizer(text_target=targets, max_length=args.max_target_length, truncation=True)
+        model_inputs = tokenizer(
+            inputs, max_length=args.max_source_length, truncation=True
+        )
+        labels = tokenizer(
+            text_target=targets, max_length=args.max_target_length, truncation=True
+        )
         model_inputs["labels"] = labels["input_ids"]
         return model_inputs
 
@@ -108,16 +135,29 @@ def main():
         ds = raw_datasets[split]
         if max_samples is not None:
             ds = ds.select(range(min(len(ds), max_samples)))
-        with training_args.main_process_first(desc=f"{split} dataset map pre-processing"):
-            return ds.map(preprocess, batched=True, remove_columns=ds.column_names, desc=f"Tokenizing {split}")
+        with training_args.main_process_first(
+            desc=f"{split} dataset map pre-processing"
+        ):
+            return ds.map(
+                preprocess,
+                batched=True,
+                remove_columns=ds.column_names,
+                desc=f"Tokenizing {split}",
+            )
 
-    train_dataset = prepare("train", args.max_train_samples) if training_args.do_train else None
-    eval_dataset = prepare("validation", args.max_eval_samples) if training_args.do_eval else None
+    train_dataset = (
+        prepare("train", args.max_train_samples) if training_args.do_train else None
+    )
+    eval_dataset = (
+        prepare("validation", args.max_eval_samples) if training_args.do_eval else None
+    )
 
     data_collator = DataCollatorForSeq2Seq(
         tokenizer,
         model=model,
-        label_pad_token_id=-100 if args.ignore_pad_token_for_loss else tokenizer.pad_token_id,
+        label_pad_token_id=-100
+        if args.ignore_pad_token_for_loss
+        else tokenizer.pad_token_id,
         pad_to_multiple_of=8 if training_args.fp16 else None,
     )
 
@@ -132,12 +172,19 @@ def main():
         labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
         # rougeLsum expects a newline after each sentence.
         decoded_preds, decoded_labels = (
-            ["\n".join(nltk.sent_tokenize(text.strip())) for text in tokenizer.batch_decode(ids, skip_special_tokens=True)]
+            [
+                "\n".join(nltk.sent_tokenize(text.strip()))
+                for text in tokenizer.batch_decode(ids, skip_special_tokens=True)
+            ]
             for ids in (preds, labels)
         )
-        result = metric.compute(predictions=decoded_preds, references=decoded_labels, use_stemmer=True)
+        result = metric.compute(
+            predictions=decoded_preds, references=decoded_labels, use_stemmer=True
+        )
         result = {k: round(v * 100, 4) for k, v in result.items()}
-        result["gen_len"] = np.mean([np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds])
+        result["gen_len"] = np.mean(
+            [np.count_nonzero(pred != tokenizer.pad_token_id) for pred in preds]
+        )
         return result
 
     if training_args.generation_max_length is None:
@@ -151,7 +198,9 @@ def main():
         eval_dataset=eval_dataset,
         processing_class=tokenizer,
         data_collator=data_collator,
-        compute_metrics=compute_metrics if training_args.predict_with_generate else None,
+        compute_metrics=compute_metrics
+        if training_args.predict_with_generate
+        else None,
     )
 
     if training_args.do_train:

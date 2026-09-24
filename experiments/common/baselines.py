@@ -10,7 +10,6 @@ Tensor = torch.Tensor
 
 
 class Baseline(nn.Module):
-
     def forward(
         self,
         query: Tensor,
@@ -35,7 +34,6 @@ class Baseline(nn.Module):
 
 
 class Softmax(Baseline):
-
     def __init__(self, use_flash_attention: bool = False):
         super().__init__()
         self.use_flash_attention = use_flash_attention
@@ -82,7 +80,6 @@ class Softmax(Baseline):
 
 
 class Linformer(Baseline):
-
     def __init__(self, rank: int):
         super().__init__()
         self.rank = rank
@@ -114,7 +111,6 @@ class Linformer(Baseline):
 
 
 class KernelAttention(Baseline):
-
     def transform_qk(self, q: Tensor, k: Tensor) -> tuple[Tensor, Tensor]:
         raise NotImplementedError()
 
@@ -171,7 +167,6 @@ class KernelAttention(Baseline):
 
 
 class Performer(KernelAttention):
-
     def __init__(self, rank: int):
         super().__init__()
         self.rank = rank
@@ -191,7 +186,6 @@ class Performer(KernelAttention):
 
 
 class Cosformer(KernelAttention):
-
     def phi(self, x: Tensor) -> Tensor:
         batch_size, num_heads, seq_len, head_dim = x.shape
         x_relu = F.relu(x)
@@ -215,7 +209,6 @@ class Cosformer(KernelAttention):
 
 
 class LinearAttention(KernelAttention):
-
     def phi(self, x: Tensor) -> Tensor:
         return 1 + F.elu(x)
 

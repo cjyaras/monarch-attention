@@ -52,7 +52,10 @@ def attention_bmm_flops(model, module_names: list[str], run) -> int:
     handles = []
     for name in module_names:
         module = model.get_submodule(name)
-        handles += [module.register_forward_pre_hook(start), module.register_forward_hook(stop)]
+        handles += [
+            module.register_forward_pre_hook(start),
+            module.register_forward_hook(stop),
+        ]
     try:
         # FLOP counters can't see inside Triton kernels; the torch implementation
         # performs the same matmuls
@@ -62,7 +65,9 @@ def attention_bmm_flops(model, module_names: list[str], run) -> int:
         for handle in handles:
             handle.remove()
 
-    total = sum(c.get_flop_counts()["Global"].get(torch.ops.aten.bmm, 0) for c in counters)
+    total = sum(
+        c.get_flop_counts()["Global"].get(torch.ops.aten.bmm, 0) for c in counters
+    )
     return total // 2
 
 
@@ -85,7 +90,9 @@ def capture_attention_inputs(attn_modules):
 
         return hook
 
-    handles = [m.register_forward_hook(make_hook(r)) for m, r in zip(attn_modules, records)]
+    handles = [
+        m.register_forward_hook(make_hook(r)) for m, r in zip(attn_modules, records)
+    ]
     try:
         yield records
     finally:

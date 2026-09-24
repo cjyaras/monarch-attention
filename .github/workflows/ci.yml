@@ -12,7 +12,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
       - name: Ruff
-        run: uvx ruff check .
+        run: |
+          uvx ruff check .
+          uvx ruff format --check .
       - name: Lock file is up to date
         run: uv lock --check
 

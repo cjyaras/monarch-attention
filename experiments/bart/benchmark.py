@@ -8,17 +8,17 @@ from experiments.bart.evaluation import Evaluator
 import torch
 
 
-parser = argparse.ArgumentParser(description='A benchmark for various attention types.')
+parser = argparse.ArgumentParser(description="A benchmark for various attention types.")
 
 parser.add_argument(
-    "--model_checkpoint_path", 
+    "--model_checkpoint_path",
     default="experiments/bart/finetuned/output/",
     help="The path to the Bart checkpoint.",
 )
 parser.add_argument(
     "--save_dir",
     default="experiments/bart/results_softmax",
-    help="The path to the output json files."
+    help="The path to the output json files.",
 )
 
 NUM_SAMPLES = None
@@ -26,6 +26,7 @@ BATCH_SIZE = 4
 
 args = parser.parse_args()
 print(args)
+
 
 def print_results(res):
     max_key_characters = 0
@@ -36,12 +37,20 @@ def print_results(res):
     for k in res.keys():
         print(f"{k:{max_key_characters}s}{res[k]}")
 
+
 @torch.no_grad()
 def main():
     file_names = {}
 
-    for max_length, nystrom_rank, block_size, num_steps in [(1024, 64, 32, 3), (2048, 80, 32, 2), (4096, 112, 64, 2), (8192, 160, 64, 2)]:
-        print(f"Max Length: {max_length}, nystrom_rank: {nystrom_rank}, block_size: {block_size}, num_steps: {num_steps}")
+    for max_length, nystrom_rank, block_size, num_steps in [
+        (1024, 64, 32, 3),
+        (2048, 80, 32, 2),
+        (4096, 112, 64, 2),
+        (8192, 160, 64, 2),
+    ]:
+        print(
+            f"Max Length: {max_length}, nystrom_rank: {nystrom_rank}, block_size: {block_size}, num_steps: {num_steps}"
+        )
         evaluator = Evaluator(
             num_samples=NUM_SAMPLES,
             batch_size=BATCH_SIZE,
@@ -62,13 +71,10 @@ def main():
         print_results(res)
         file_names[f"softmax_{max_length}"] = file_name
 
-
-
         # Nystromformer
         config = get_config()
         config.attention_type = get_mixed_type(
-            efficient_attn_layers,
-            AttentionType.nystromformer, AttentionType.softmax
+            efficient_attn_layers, AttentionType.nystromformer, AttentionType.softmax
         )
         config.rank = nystrom_rank
         print(config.attention_type)
@@ -77,12 +83,12 @@ def main():
         print_results(res)
         file_names[f"nystrom_{max_length}_rank{nystrom_rank}"] = file_name
 
-
         # Monarch
         config = get_config()
         config.attention_type = get_mixed_type(
             efficient_attn_layers,
-            AttentionType.monarch_attention, AttentionType.softmax
+            AttentionType.monarch_attention,
+            AttentionType.softmax,
         )
         config.num_steps = num_steps
         config.block_size = block_size

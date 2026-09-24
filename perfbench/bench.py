@@ -388,7 +388,6 @@ def sweep_seq_len(batch, num_heads, d, T):
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--run_mode",

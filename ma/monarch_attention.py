@@ -53,11 +53,15 @@ class MonarchAttention(nn.Module):
     is nonzero for tokens to keep, and returns (batch, heads, seq_len, head_dim).
     """
 
-    def __init__(self, block_size: int, num_steps: int, pad_type: PadType, impl: str = "torch"):
+    def __init__(
+        self, block_size: int, num_steps: int, pad_type: PadType, impl: str = "torch"
+    ):
         super().__init__()
         if IMPLEMENTATIONS.get(impl) is None:
             available = ", ".join(name for name, fn in IMPLEMENTATIONS.items() if fn)
-            raise ValueError(f"Unknown or unavailable impl {impl!r}. Available: {available}")
+            raise ValueError(
+                f"Unknown or unavailable impl {impl!r}. Available: {available}"
+            )
         self.block_size = block_size
         self.num_steps = num_steps
         self.pad_type = pad_type

@@ -190,7 +190,10 @@ def _al_cl_kernel(
             + stride_v_e * idx_e
             + stride_v_h * idx_h
             + stride_v_m * idx_m
-            + (stride_v_b * (range_b - pad_offset)[:, None] + stride_v_d * range_d[None, :])
+            + (
+                stride_v_b * (range_b - pad_offset)[:, None]
+                + stride_v_d * range_d[None, :]
+            )
         )
         v = tl.load(
             v_block_ptr,

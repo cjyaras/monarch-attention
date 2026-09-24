@@ -6,6 +6,7 @@ from diffusers.models.attention_processor import Attention, AttnProcessor2_0
 from experiments.common.attention import get_attn_module
 from experiments.dit.config import EfficientAttnConfig
 
+
 class EfficientAttnProcessor(AttnProcessor2_0):
     def __init__(self, config: EfficientAttnConfig, layer_num: Optional[int] = None):
         super().__init__()

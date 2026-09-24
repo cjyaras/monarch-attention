@@ -13,7 +13,6 @@ from experiments.bart.processor import get_processor
 
 
 class Evaluator:
-
     def __init__(
         self,
         num_samples: int,
@@ -32,22 +31,31 @@ class Evaluator:
         self.max_new_tokens = max_new_tokens
 
     @torch.no_grad()
-    def summarize(self, model: CustomBartForConditionalGeneration, texts: list[str]) -> list[str]:
+    def summarize(
+        self, model: CustomBartForConditionalGeneration, texts: list[str]
+    ) -> list[str]:
         # Same settings the Hugging Face summarization pipeline used: the model's
         # generation config, with pipeline defaults for anything it leaves unset
         generation_config = copy.deepcopy(model.generation_config)
         generation_config.update(max_new_tokens=256, num_beams=4, defaults_only=True)
         generation_config.update(max_new_tokens=self.max_new_tokens)
 
-        inputs = self.tokenizer(texts, padding=True, truncation=True, return_tensors="pt")
-        output_ids = model.generate(**inputs.to(model.device), generation_config=generation_config)
+        inputs = self.tokenizer(
+            texts, padding=True, truncation=True, return_tensors="pt"
+        )
+        output_ids = model.generate(
+            **inputs.to(model.device), generation_config=generation_config
+        )
         return self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)
 
     def evaluate(self, config: CustomBartConfig) -> Dict[str, float]:
         model = get_model(config, model_checkpoint_path=self.model_checkpoint_path)
         flops = attention_bmm_flops(
             model,
-            [f"model.encoder.layers.{i}.self_attn" for i in range(config.encoder_layers)],
+            [
+                f"model.encoder.layers.{i}.self_attn"
+                for i in range(config.encoder_layers)
+            ],
             lambda: self.summarize(model, self.dataset[:1]["chapter"]),
         )
 

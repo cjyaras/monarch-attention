@@ -7,6 +7,7 @@ from experiments.dit.attention import CustomBasicTransformerBlock
 from experiments.dit.config import EfficientAttnConfig
 from experiments.common.utils import get_device
 
+
 class CustomDiTTransformer2DModel(DiTTransformer2DModel):
     """
     A custom 2D Transformer model that takes in efficient attention approximations
@@ -30,9 +31,9 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
         upcast_attention: bool = False,
         norm_type: str = "ada_norm_zero",
         norm_elementwise_affine: bool = False,
-        norm_eps: float = 1e-5
+        norm_eps: float = 1e-5,
     ):
-        
+
         super().__init__(
             num_attention_heads,
             attention_head_dim,
@@ -49,7 +50,7 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
             upcast_attention,
             norm_type,
             norm_elementwise_affine,
-            norm_eps
+            norm_eps,
         )
 
         # Change to custom Transformer blocks which allows for efficient attention modules
@@ -68,19 +69,23 @@ class CustomDiTTransformer2DModel(DiTTransformer2DModel):
                     upcast_attention=self.config.upcast_attention,
                     norm_type=norm_type,
                     norm_elementwise_affine=self.config.norm_elementwise_affine,
-                    norm_eps=self.config.norm_eps
+                    norm_eps=self.config.norm_eps,
                 )
                 for layer_idx in range(self.config.num_layers)
             ]
         )
 
 
-def get_model(config: EfficientAttnConfig,
-              model_path: str = "facebook/DiT-XL-2-256",
-              model_subfolder: str = "transformer"):
-    
+def get_model(
+    config: EfficientAttnConfig,
+    model_path: str = "facebook/DiT-XL-2-256",
+    model_subfolder: str = "transformer",
+):
+
     device = get_device()
-    model = CustomDiTTransformer2DModel.from_pretrained(model_path, subfolder=model_subfolder, efficient_attention_config=config)
+    model = CustomDiTTransformer2DModel.from_pretrained(
+        model_path, subfolder=model_subfolder, efficient_attention_config=config
+    )
     model = model.to(device)  # type: ignore
     model.eval()
 

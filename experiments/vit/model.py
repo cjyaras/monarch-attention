@@ -1,4 +1,3 @@
-
 from transformers.models.vit.modeling_vit import (
     ViTForImageClassification,
     ViTModel,
@@ -15,8 +14,8 @@ from experiments.vit.config import CustomViTConfig
 
 set_verbosity(ERROR)
 
-class CustomViTModel(ViTModel):
 
+class CustomViTModel(ViTModel):
     def __init__(
         self,
         config: CustomViTConfig,
@@ -36,7 +35,6 @@ register_checkpoint_conversion_mapping(
 
 
 class CustomViTForImageClassification(ViTForImageClassification):
-
     def __init__(self, config: CustomViTConfig):
         super().__init__(config)
         self.vit = CustomViTModel(config, add_pooling_layer=False)

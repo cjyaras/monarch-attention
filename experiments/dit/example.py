@@ -10,15 +10,17 @@ import os
 
 import time
 
+
 def save_output_images(output: ImagePipelineOutput, save_path: str):
     images = torch.Tensor(output.images)
     images_reshaped = images.permute(0, 3, 1, 2)
     save_image(images_reshaped, save_path)
 
 
-
 # Create dict of which attention layers should be replaced
-def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:
+def generate_attn_dict(
+    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
+) -> Dict:
     assert max(layers_to_replace) <= num_layers
 
     attn_dict = {}
@@ -36,12 +38,18 @@ model_subfolder = "transformer"
 layers_to_replace = list(range(14))
 attn_dict = generate_attn_dict(AttentionType.monarch, layers_to_replace)
 
-sm_pipe = get_pipeline(attn_type=AttentionType.softmax, model_path=model_path, model_subfolder=model_subfolder)
-monarch_pipe = get_pipeline(attn_type=attn_dict, model_path=model_path, model_subfolder=model_subfolder)
+sm_pipe = get_pipeline(
+    attn_type=AttentionType.softmax,
+    model_path=model_path,
+    model_subfolder=model_subfolder,
+)
+monarch_pipe = get_pipeline(
+    attn_type=attn_dict, model_path=model_path, model_subfolder=model_subfolder
+)
 
 
 # pick words that exist in ImageNet
-#idx = 0 
+# idx = 0
 words = ["triceratops", "German shepherd"]
 
 
@@ -57,7 +65,7 @@ latents = torch.randn(len(words), latent_channels, latent_size, latent_size)
 
 
 # Save images
-save_path = 'experiments/dit/generations/'
+save_path = "experiments/dit/generations/"
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
@@ -65,7 +73,12 @@ if not os.path.exists(save_path):
 class_ids = sm_pipe.get_label_ids(words)
 
 start = time.time()
-sm_output = sm_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type = "numpy")
+sm_output = sm_pipe(
+    class_labels=class_ids,
+    latents=latents,
+    num_inference_steps=num_inference_steps,
+    output_type="numpy",
+)
 sm_gen_time = time.time() - start
 
 print("Softmax:", sm_gen_time, "seconds for", num_inference_steps, "inference steps")
@@ -77,9 +90,25 @@ save_output_images(sm_output, sm_save_path)
 class_ids = monarch_pipe.get_label_ids(words)
 
 start = time.time()
-monarch_output = monarch_pipe(class_labels=class_ids, latents=latents, num_inference_steps=num_inference_steps, output_type = "numpy") 
+monarch_output = monarch_pipe(
+    class_labels=class_ids,
+    latents=latents,
+    num_inference_steps=num_inference_steps,
+    output_type="numpy",
+)
 monarch_gen_time = time.time() - start
 
-print("monarch:", monarch_gen_time, "seconds for", num_inference_steps, "inference steps")
-monarch_save_path = os.path.join(save_path, "monarch_layers_" + str(layers_to_replace[0]) + "_" + str(layers_to_replace[-1])) + ".png"
+print(
+    "monarch:", monarch_gen_time, "seconds for", num_inference_steps, "inference steps"
+)
+monarch_save_path = (
+    os.path.join(
+        save_path,
+        "monarch_layers_"
+        + str(layers_to_replace[0])
+        + "_"
+        + str(layers_to_replace[-1]),
+    )
+    + ".png"
+)
 save_output_images(monarch_output, monarch_save_path)

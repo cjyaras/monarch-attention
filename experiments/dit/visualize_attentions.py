@@ -10,7 +10,9 @@ from experiments.common.baselines import Softmax, Nystromformer
 from experiments.dit.extract import extract_query_key
 
 
-def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28) -> Dict:
+def generate_attn_dict(
+    attn_type: AttentionType, layers_to_replace: List, num_layers: int = 28
+) -> Dict:
     assert max(layers_to_replace) <= num_layers
 
     attn_dict = {}
@@ -18,6 +20,7 @@ def generate_attn_dict(attn_type: AttentionType, layers_to_replace: List, num_la
         attn_dict[i] = attn_type if i in layers_to_replace else AttentionType.softmax
 
     return attn_dict
+
 
 @torch.no_grad()
 def main():
@@ -27,7 +30,7 @@ def main():
             efficient_attention_type,
             words=["triceratops"],
             seed=33,
-            num_inference_steps=1
+            num_inference_steps=1,
         )
         torch.save(query, "experiments/dit/query.pt")
         torch.save(key, "experiments/dit/key.pt")
@@ -35,10 +38,7 @@ def main():
     if not os.path.exists("experiments/dit/query_first_half_nystrom.pt"):
         attn_type = generate_attn_dict(AttentionType.nystromformer, list(range(1, 15)))
         query, key = extract_query_key(
-            attn_type,
-            words=["triceratops"],
-            seed=0,
-            num_inference_steps=1
+            attn_type, words=["triceratops"], seed=0, num_inference_steps=1
         )
         torch.save(query, "experiments/dit/query_first_half_nystrom.pt")
         torch.save(key, "experiments/dit/key_first_half_nystrom.pt")
@@ -61,30 +61,50 @@ def main():
         key_nystrom = key_nystrom[[0], layer]
 
         softmax = Softmax()
-        #monarch = MonarchAttention(16, 3, PadType.pre)
+        # monarch = MonarchAttention(16, 3, PadType.pre)
         nystrom = Nystromformer(32, 16)
 
         for head in heads:
-            softmax_nystrom_matrix = softmax.get_matrix(query_nystrom, key_nystrom)[0, head].detach().cpu().numpy()
-            #monarch_matrix = monarch.get_matrix(query, key)[0, head].detach().cpu().numpy()
-            nystrom_matrix = nystrom.get_matrix(query_nystrom, key_nystrom)[0, head].detach().cpu().numpy()
-            softmax_matrix = softmax.get_matrix(query, key)[0, head].detach().cpu().numpy()
+            softmax_nystrom_matrix = (
+                softmax.get_matrix(query_nystrom, key_nystrom)[0, head]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            # monarch_matrix = monarch.get_matrix(query, key)[0, head].detach().cpu().numpy()
+            nystrom_matrix = (
+                nystrom.get_matrix(query_nystrom, key_nystrom)[0, head]
+                .detach()
+                .cpu()
+                .numpy()
+            )
+            softmax_matrix = (
+                softmax.get_matrix(query, key)[0, head].detach().cpu().numpy()
+            )
 
             fig, ax = plt.subplots(1, 3)
             ax[0].imshow(softmax_matrix)
-            ax[0].set_title('Softmax (original)')
+            ax[0].set_title("Softmax (original)")
 
             ax[1].imshow(softmax_nystrom_matrix)
-            ax[1].set_title('Softmax (first half nystrom)')
+            ax[1].set_title("Softmax (first half nystrom)")
 
-            #ax[1].imshow(monarch_matrix)
-            #ax[1].set_title('Monarch')
+            # ax[1].imshow(monarch_matrix)
+            # ax[1].set_title('Monarch')
 
             ax[2].imshow(nystrom_matrix)
-            ax[2].set_title('Nystromformer')
+            ax[2].set_title("Nystromformer")
 
-            fig.suptitle('Layer ' + str(layer) + ' head ' + str(head) + ' attention matrices')
-            plt.savefig('experiments/dit/nystrom_attns/layer_' + str(layer) + '_head_' + str(head) + '_attentions.png')
+            fig.suptitle(
+                "Layer " + str(layer) + " head " + str(head) + " attention matrices"
+            )
+            plt.savefig(
+                "experiments/dit/nystrom_attns/layer_"
+                + str(layer)
+                + "_head_"
+                + str(head)
+                + "_attentions.png"
+            )
             plt.close()
 
 

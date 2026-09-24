@@ -35,7 +35,9 @@ def get_shards(num_samples: Optional[int], split: str) -> list[str]:
         if num_samples is not None and num_rows >= num_samples:
             return shards
     if num_samples is not None:
-        raise ValueError(f"Only {num_rows} {split} samples available, need {num_samples}")
+        raise ValueError(
+            f"Only {num_rows} {split} samples available, need {num_samples}"
+        )
     return shards
 
 

@@ -53,7 +53,8 @@ class AttentionConfig:
 
     def __init__(
         self,
-        attention_type: AttentionType | dict[int, AttentionType] = AttentionType.softmax,
+        attention_type: AttentionType
+        | dict[int, AttentionType] = AttentionType.softmax,
         enable_flash_attention: bool = False,
         num_steps: int | None = None,
         rank: int | None = None,
@@ -104,7 +105,9 @@ def get_mixed_type(
     num_layers: int = 12,
 ) -> dict[int, AttentionType]:
     return {
-        layer_num: efficient_type if layer_num in efficient_attn_layers else default_type
+        layer_num: efficient_type
+        if layer_num in efficient_attn_layers
+        else default_type
         for layer_num in range(num_layers)
     }
 

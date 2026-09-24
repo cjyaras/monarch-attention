@@ -13,7 +13,7 @@ class EfficientAttnConfig:
         block_size: Optional[int] = 16,
         num_steps: Optional[int] = 3,
         pad_type: PadType = PadType.pre,
-        num_attention_heads: int = 16
+        num_attention_heads: int = 16,
     ):
 
         self.attention_type = attention_type

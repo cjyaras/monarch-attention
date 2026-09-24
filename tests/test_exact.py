@@ -24,7 +24,9 @@ def tol(impl):
 
 def _qkv(device, dtype=torch.float32):
     g = torch.Generator().manual_seed(0)
-    return [torch.randn(E, H, N, D, generator=g, dtype=dtype).to(device) for _ in range(3)]
+    return [
+        torch.randn(E, H, N, D, generator=g, dtype=dtype).to(device) for _ in range(3)
+    ]
 
 
 @pytest.mark.parametrize("device", DEVICES)
@@ -56,4 +58,6 @@ def test_exact_with_mask(device, block_size, num_steps, pad_type, trailing_paddi
     keep = mask[:, None, :, None].expand_as(q)  # outputs for masked queries are unused
     for impl in impls(device):
         out = MonarchAttention(block_size, num_steps, pad_type, impl)(q, k, v, mask)
-        torch.testing.assert_close(out[keep], expected[keep], atol=tol(impl), rtol=tol(impl))
+        torch.testing.assert_close(
+            out[keep], expected[keep], atol=tol(impl), rtol=tol(impl)
+        )

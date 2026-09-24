@@ -27,7 +27,9 @@ import torch
 from ma import MonarchAttention, PadType
 
 attn = MonarchAttention(block_size=16, num_steps=2, pad_type=PadType.pre, impl="triton")
-q, k, v = (torch.randn(2, 12, 1024, 64, device="cuda", dtype=torch.float16) for _ in range(3))
+q, k, v = (
+    torch.randn(2, 12, 1024, 64, device="cuda", dtype=torch.float16) for _ in range(3)
+)
 mask = torch.ones(2, 1024, dtype=torch.bool, device="cuda")  # optional, True = keep
 out = attn(q, k, v, mask)  # (2, 12, 1024, 64)
 ```
@@ -40,10 +42,11 @@ Run the tests (CUDA-only tests are skipped without a GPU):
 uv run pytest
 ```
 
-Lint (also run in CI):
+Lint and format (also checked in CI):
 
 ```
 uvx ruff check .
+uvx ruff format .
 ```
 
 Run the ViT benchmark:

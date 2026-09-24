@@ -12,7 +12,6 @@ from experiments.vit.processor import get_processor
 
 
 class Evaluator:
-
     def __init__(
         self,
         num_samples: Optional[int],

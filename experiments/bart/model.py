@@ -36,7 +36,8 @@ class CustomBartModel(BartModel):
 
 
 class CustomBartForConditionalGeneration(BartForConditionalGeneration):
-    config_class=CustomBartConfig
+    config_class = CustomBartConfig
+
     def __init__(self, config: CustomBartConfig):
         super().__init__(config)
         if config.use_original_bart:
@@ -49,45 +50,45 @@ class CustomBartForConditionalGeneration(BartForConditionalGeneration):
             self.model = CustomBartModel(config)
         self.post_init()
 
-
     @torch.no_grad()
     def resize_position_embeddings(self, new_max_position_embeddings: int):
         old_embeddings = self.model.encoder.embed_positions  # shared with decoder
         old_num_positions, embed_dim = old_embeddings.weight.shape
-        
+
         # Create new position embeddings
-        new_embeddings = BartLearnedPositionalEmbedding(new_max_position_embeddings, embed_dim)
-        
-        interpolated = torch.nn.functional.interpolate(
-            old_embeddings.weight[2:,:].T.unsqueeze(0),
-            new_max_position_embeddings,
-            mode='linear',
-            align_corners=True,
-        ).squeeze(0).T
+        new_embeddings = BartLearnedPositionalEmbedding(
+            new_max_position_embeddings, embed_dim
+        )
+
+        interpolated = (
+            torch.nn.functional.interpolate(
+                old_embeddings.weight[2:, :].T.unsqueeze(0),
+                new_max_position_embeddings,
+                mode="linear",
+                align_corners=True,
+            )
+            .squeeze(0)
+            .T
+        )
 
         new_embeddings.weight.copy_(
-            torch.cat(
-                [
-                    old_embeddings.weight[:2,:],
-                    interpolated
-                ]
-            )
+            torch.cat([old_embeddings.weight[:2, :], interpolated])
         )
-        
+
         # Replace embeddings in both encoder and decoder
         self.model.encoder.embed_positions = new_embeddings
-        #self.model.decoder.embed_positions = new_embeddings
-        
+        # self.model.decoder.embed_positions = new_embeddings
+
         # Update config
         self.config.max_position_embeddings = new_max_position_embeddings
         for m in self.modules():
-            if hasattr(m, 'config'):
+            if hasattr(m, "config"):
                 m.config.max_position_embeddings = new_max_position_embeddings
 
 
 def get_model(
     config: CustomBartConfig,
-    model_checkpoint_path:str = "experiments/bart/finetuned/output/",
+    model_checkpoint_path: str = "experiments/bart/finetuned/output/",
 ) -> CustomBartForConditionalGeneration:
     device = get_device()
     model = CustomBartForConditionalGeneration.from_pretrained(

@@ -1,4 +1,3 @@
-
 from transformers.models.roberta.modeling_roberta import (
     RobertaForQuestionAnswering,
     RobertaModel,
