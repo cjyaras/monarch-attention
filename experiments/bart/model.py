@@ -80,7 +80,7 @@ class CustomBartForConditionalGeneration(BartForConditionalGeneration):
         
         # Update config
         self.config.max_position_embeddings = new_max_position_embeddings
-        for mn, m in self.named_modules():
+        for m in self.modules():
             if hasattr(m, 'config'):
                 m.config.max_position_embeddings = new_max_position_embeddings
 

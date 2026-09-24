@@ -113,8 +113,8 @@ def main():
     latent_size = pipe.transformer.config.sample_size
 
     # Sample images
-    total_samples = int(ceil(num_samples / batch_size)) * batch_size
-    num_iters = int(total_samples // batch_size)
+    total_samples = ceil(num_samples / batch_size) * batch_size
+    num_iters = total_samples // batch_size
     output_type = "numpy"
     pbar = tqdm(range(num_iters))
     for (i, _) in enumerate(pbar):         

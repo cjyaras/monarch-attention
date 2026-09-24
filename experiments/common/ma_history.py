@@ -26,7 +26,7 @@ def monarch_attention_history(q: Tensor, k: Tensor, T: int, B: int) -> list[Tens
     history = []
 
     # Alternating maximization for L, R
-    for t in range(T):
+    for _ in range(T):
         # R update
         aR = torch.einsum("jkl,jlv->kjv", L, qb)
         bR = torch.einsum("kjv,kiv->kji", aR, kb)

@@ -347,7 +347,7 @@ def sweep_seq_len(batch, num_heads, d, T):
         flash_attn_times.append(best_flash_time)
 
     plt.figure(figsize=(10, 6))
-    plt.plot(seq_lens, flash_monarch_times, label="flash_monarch_attention", marker="o")
+    plt.plot(seq_lens, flash_monarch_times, label="monarch_attention", marker="o")
     plt.plot(seq_lens, flash_attn_times, label="best_flash_attention", marker="s")
     plt.xscale("log", base=2)
     plt.xlabel("Sequence Length (log scale)")
