@@ -12,21 +12,21 @@ PyTorch's `scaled_dot_product_attention` (cuDNN):
 
 | Sequence length N | FlashAttention-4 | PyTorch SDPA | MonarchAttention | Speedup vs FA4 |
 |---:|---:|---:|---:|---:|
-| 1,024 | 0.020 ms | 0.019 ms | 0.015 ms | 1.4x |
-| 2,048 | 0.031 ms | 0.045 ms | 0.021 ms | 1.5x |
-| 4,096 | 0.104 ms | 0.119 ms | 0.031 ms | 3.4x |
-| 8,192 | 0.398 ms | 0.459 ms | 0.063 ms | 6.3x |
-| 16,384 | 1.563 ms | 1.818 ms | 0.133 ms | 12x |
+| 1,024 | 0.020 ms | 0.019 ms | 0.015 ms | 1.3x |
+| 2,048 | 0.032 ms | 0.045 ms | 0.021 ms | 1.5x |
+| 4,096 | 0.103 ms | 0.117 ms | 0.031 ms | 3.4x |
+| 8,192 | 0.394 ms | 0.471 ms | 0.056 ms | 7.0x |
+| 16,384 | 1.532 ms | 1.813 ms | 0.105 ms | 15x |
 
 NVIDIA A100 80 GB, vs PyTorch's `scaled_dot_product_attention` (FlashAttention-2):
 
 | Sequence length N | FlashAttention-2 | MonarchAttention | Speedup |
 |---:|---:|---:|---:|
-| 1,024 | 0.035 ms | 0.022 ms | 1.6x |
-| 2,048 | 0.090 ms | 0.030 ms | 3.0x |
-| 4,096 | 0.324 ms | 0.051 ms | 6.4x |
-| 8,192 | 1.243 ms | 0.104 ms | 12x |
-| 16,384 | 4.589 ms | 0.205 ms | 22x |
+| 1,024 | 0.034 ms | 0.022 ms | 1.5x |
+| 2,048 | 0.090 ms | 0.029 ms | 3.1x |
+| 4,096 | 0.323 ms | 0.050 ms | 6.4x |
+| 8,192 | 1.239 ms | 0.100 ms | 12x |
+| 16,384 | 4.576 ms | 0.189 ms | 24x |
 
 These are GPU kernel times. For short sequences, Python launch overhead dominates in eager
 mode (MonarchAttention launches two Triton kernels per call), so run the model under CUDA
