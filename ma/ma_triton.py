@@ -1,4 +1,4 @@
-from math import sqrt
+from math import e, log2, sqrt
 
 import torch
 import triton
@@ -27,6 +27,18 @@ def _config(n: int) -> dict:
 
 
 @triton.jit
+def _strides_mb(H, M, B, D):
+    """Strides (e, h, m, b, d) of a contiguous (E, H, M, B, D) tensor."""
+    return H * M * B * D, M * B * D, B * D, D, 1
+
+
+@triton.jit
+def _strides_bm(H, M, B, D):
+    """Strides (e, h, m, b, d) of a contiguous (E, H, B, M, D) tensor."""
+    return H * B * M * D, B * M * D, D, M * D, 1
+
+
+@triton.jit
 def _al_cl_kernel(
     ar_ptr,
     stride_ar_e,
@@ -47,27 +59,9 @@ def _al_cl_kernel(
     stride_v_b,
     stride_v_d,
     cr_ptr,
-    stride_cr_e,
-    stride_cr_h,
-    stride_cr_m,
-    stride_cr_b,
     al_ptr,
-    stride_al_e,
-    stride_al_h,
-    stride_al_m,
-    stride_al_b,
-    stride_al_d,
     y_ptr,
-    stride_y_e,
-    stride_y_h,
-    stride_y_m,
-    stride_y_b,
-    stride_y_d,
     cl_ptr,
-    stride_cl_e,
-    stride_cl_h,
-    stride_cl_m,
-    stride_cl_b,
     mask_ptr,
     stride_mask_e,
     stride_mask_m,
@@ -78,7 +72,7 @@ def _al_cl_kernel(
     D: int,
     N: int,
     IS_FIRST_CALL: tl.constexpr,
-    sm_scale: float,
+    qk_scale: float,
     HAS_ATTN_MASK: tl.constexpr,
     BLOCK_R: tl.constexpr,
     BLOCK_C: tl.constexpr,
@@ -86,6 +80,15 @@ def _al_cl_kernel(
     PRE_PAD: tl.constexpr,
     COMPUTE_Y: tl.constexpr,
 ):
+    # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
+    # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
+    # (E, H, M, B, ...) for _al_cl_kernel
+    stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
+        H, M, B, D
+    )
+    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(H, M, B, D)
+    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, B, 1)
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
     # One program per (batch, head, block m, chunk of BLOCK_R query rows). It
     # streams over the block's keys in chunks of BLOCK_C with an online softmax.
     idx_ehm = tl.program_id(0)
@@ -130,8 +133,8 @@ def _al_cl_kernel(
         )
         cr = tl.load(cr_block_ptr, mask=mask_r, other=1.0)
 
-    # Running row max, normalizer sum(exp(s - max)) and entropy numerator
-    # sum(exp(s - max) (s - max)), rescaled whenever the max grows
+    # Running row max, normalizer sum(exp2(s - max)) and entropy numerator
+    # sum(exp2(s - max) (s - max)), rescaled whenever the max grows
     row_max = tl.full([BLOCK_R], float("-inf"), tl.float32)
     denom = tl.zeros([BLOCK_R], tl.float32)
     ent = tl.zeros([BLOCK_R], tl.float32)
@@ -165,16 +168,16 @@ def _al_cl_kernel(
         )
         k = tl.load(k_block_ptr, mask=k_mask_c[:, None] & mask_d[None, :], other=0.0)
 
-        # Logits s, and p = exp(s - max) for the chunk
-        s = sm_scale * tl.dot(ar, tl.trans(k))
+        # Base-2 logits s, and p = exp2(s - max) for the chunk
+        s = qk_scale * tl.dot(ar, tl.trans(k))
         if not IS_FIRST_CALL:
             s = s / cr[:, None]
         s = tl.where(k_mask_c[None, :], s, float("-inf"))
         new_max = tl.maximum(row_max, tl.max(s, axis=1))
         # Rows whose keys so far are all masked keep a max of -inf; shift by 0
         shift = tl.where(new_max == float("-inf"), 0.0, new_max)
-        alpha = tl.exp(row_max - shift)
-        p = tl.exp(s - shift[:, None])
+        alpha = tl.exp2(row_max - shift)
+        p = tl.exp2(s - shift[:, None])
         s_shifted = tl.where(k_mask_c[None, :], s - shift[:, None], 0.0)
         ent_shift = tl.where(denom > 0, denom * (row_max - shift), 0.0)
         ent = alpha * (ent + ent_shift) + tl.sum(p * s_shifted, axis=1)
@@ -200,10 +203,10 @@ def _al_cl_kernel(
 
     # r = p / denom. A block whose keys are all masked (denom = 0) has no
     # attention weights and gets cl = inf, which gives it zero weight when
-    # queries choose between blocks. cl = sum(r log r) = ent / denom - log(denom).
+    # queries choose between blocks. cl = sum(r log2 r) = ent / denom - log2(denom).
     has_keys = denom > 0
     inv_denom = tl.where(has_keys, 1.0 / denom, 0.0)
-    cl = tl.where(has_keys, ent * inv_denom - tl.log(denom), float("inf"))
+    cl = tl.where(has_keys, ent * inv_denom - tl.log2(denom), float("inf"))
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e
@@ -214,7 +217,7 @@ def _al_cl_kernel(
     tl.store(cl_block_ptr, cl, mask=mask_r)
 
     # Store al
-    al = (sm_scale * acc_al * inv_denom[:, None]).to(ar.dtype)
+    al = (qk_scale * acc_al * inv_denom[:, None]).to(ar.dtype)
     al_block_ptr = (
         al_ptr
         + stride_al_e * idx_e
@@ -239,11 +242,6 @@ def _al_cl_kernel(
 @triton.jit
 def _ar_cr_kernel(
     al_ptr,
-    stride_al_e,
-    stride_al_h,
-    stride_al_m,
-    stride_al_b,
-    stride_al_d,
     q_ptr,
     stride_q_e,
     stride_q_h,
@@ -251,22 +249,9 @@ def _ar_cr_kernel(
     stride_q_b,
     stride_q_d,
     cl_ptr,
-    stride_cl_e,
-    stride_cl_h,
-    stride_cl_m,
-    stride_cl_b,
     lse_ptr,  # same layout as cl
     ar_ptr,
-    stride_ar_e,
-    stride_ar_h,
-    stride_ar_m,
-    stride_ar_b,
-    stride_ar_d,
     cr_ptr,
-    stride_cr_e,
-    stride_cr_h,
-    stride_cr_m,
-    stride_cr_b,
     mask_ptr,
     stride_mask_e,
     stride_mask_m,
@@ -282,6 +267,17 @@ def _ar_cr_kernel(
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
 ):
+    # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
+    # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
+    # (E, H, M, B, ...) for _al_cl_kernel
+    stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
+        H, M, B, D
+    )
+    stride_ar_e, stride_ar_h, stride_ar_m, stride_ar_b, stride_ar_d = _strides_mb(
+        H, M, B, D
+    )
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
+    stride_cr_e, stride_cr_h, stride_cr_m, stride_cr_b, _ = _strides_mb(H, M, B, 1)
     # One program per (batch, head, position b, chunk of BLOCK_R blocks). Each
     # query's softmax over blocks is normalized by its log-sum-exp from
     # _z_kernel(COMPUTE_Z=False), so the program can stream over the queries in
@@ -354,7 +350,7 @@ def _ar_cr_kernel(
 
         # Attention matrix, normalized over blocks (rows); masked queries get 0
         l = tl.dot(al, tl.trans(q)) - cl[:, None] - lse[None, :]
-        l = tl.where(mask_r[:, None] & q_mask_c[None, :], tl.exp(l), 0.0)
+        l = tl.where(mask_r[:, None] & q_mask_c[None, :], tl.exp2(l), 0.0)
         acc_cr += tl.sum(l, axis=1)
         acc_ar += tl.dot(l.to(q.dtype), q)
 
@@ -380,11 +376,6 @@ def _ar_cr_kernel(
 @triton.jit
 def _z_kernel(
     al_ptr,
-    stride_al_e,
-    stride_al_h,
-    stride_al_m,
-    stride_al_b,
-    stride_al_d,
     q_ptr,
     stride_q_e,
     stride_q_h,
@@ -392,16 +383,7 @@ def _z_kernel(
     stride_q_b,
     stride_q_d,
     y_ptr,
-    stride_y_e,
-    stride_y_h,
-    stride_y_m,
-    stride_y_b,
-    stride_y_d,
     cl_ptr,
-    stride_cl_e,
-    stride_cl_h,
-    stride_cl_m,
-    stride_cl_b,
     lse_ptr,  # same layout as cl
     z_ptr,
     stride_z_e,
@@ -420,6 +402,14 @@ def _z_kernel(
     PRE_PAD: tl.constexpr,
     COMPUTE_Z: tl.constexpr,
 ):
+    # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
+    # that _z_kernel and _ar_cr_kernel read them contiguously; ar and cr are
+    # (E, H, M, B, ...) for _al_cl_kernel
+    stride_al_e, stride_al_h, stride_al_m, stride_al_b, stride_al_d = _strides_bm(
+        H, M, B, D
+    )
+    stride_y_e, stride_y_h, stride_y_m, stride_y_b, stride_y_d = _strides_bm(H, M, B, D)
+    stride_cl_e, stride_cl_h, stride_cl_m, stride_cl_b, _ = _strides_bm(H, M, B, 1)
     # One program per (batch, head, position b, chunk of BLOCK_R query blocks).
     # It streams over the blocks' al, cl and y in chunks of BLOCK_C with an
     # online softmax. With COMPUTE_Z=False it only stores each query's
@@ -480,8 +470,8 @@ def _z_kernel(
         s = tl.where(mask_c[None, :], s, float("-inf"))
         new_max = tl.maximum(row_max, tl.max(s, axis=1))
         shift = tl.where(new_max == float("-inf"), 0.0, new_max)
-        alpha = tl.exp(row_max - shift)
-        p = tl.exp(s - shift[:, None])
+        alpha = tl.exp2(row_max - shift)
+        p = tl.exp2(s - shift[:, None])
         denom = alpha * denom + tl.sum(p, axis=1)
         row_max = new_max
         if COMPUTE_Z:
@@ -513,7 +503,7 @@ def _z_kernel(
             + stride_cl_b * idx_b
             + (stride_cl_m * range_r)
         )
-        tl.store(lse_block_ptr, row_max + tl.log(denom), mask=mask_r)
+        tl.store(lse_block_ptr, row_max + tl.log2(denom), mask=mask_r)
 
 
 def monarch_attention_triton(
@@ -539,27 +529,24 @@ def monarch_attention_triton(
 
     BLOCK_D = max(triton.next_power_of_2(D), 16)
 
-    sm_scale = 1 / sqrt(D)
+    # The kernels work in base 2 (exp2 and log2 are native instructions): logits
+    # are scaled by log2(e), and so are al, cl and lse.
+    qk_scale = log2(e) / sqrt(D)
 
     q_strides = (q.stride(0), q.stride(1), B * q.stride(2), q.stride(2), q.stride(3))
     k_strides = (k.stride(0), k.stride(1), B * k.stride(2), k.stride(2), k.stride(3))
     v_strides = (v.stride(0), v.stride(1), B * v.stride(2), v.stride(2), v.stride(3))
 
-    ar = torch.empty(E, H, M, B, D, device=q.device, dtype=q.dtype)
-    al = torch.empty_like(ar)
-
-    ar_strides = (ar.stride(0), ar.stride(1), ar.stride(2), ar.stride(3), ar.stride(4))
-    al_strides = (al.stride(0), al.stride(1), al.stride(2), al.stride(3), al.stride(4))
-
+    # Intermediate buffers, contiguous in the layouts the kernels assume
+    # (_strides_bm, _strides_mb)
+    al = torch.empty(E, H, B, M, D, device=q.device, dtype=q.dtype)
     y = torch.empty_like(al)
-    y_strides = (y.stride(0), y.stride(1), y.stride(2), y.stride(3), y.stride(4))
-
-    cr = torch.empty(E, H, M, B, device=q.device, dtype=torch.float)
-    cl = torch.empty_like(cr)
-
-    cr_strides = (cr.stride(0), cr.stride(1), cr.stride(2), cr.stride(3))
-    cl_strides = (cl.stride(0), cl.stride(1), cl.stride(2), cl.stride(3))
-    lse = torch.empty_like(cl) if T > 1 else None  # read by _ar_cr_kernel
+    cl = torch.empty(E, H, B, M, device=q.device, dtype=torch.float)
+    # Only needed for T > 1: ar, cr and each query's log-sum-exp over blocks
+    ar = torch.empty(E, H, M, B, D, device=q.device, dtype=q.dtype) if T > 1 else None
+    ar_strides = (H * M * B * D, M * B * D, B * D, D, 1)
+    cr = torch.empty(E, H, M, B, device=q.device, dtype=torch.float) if T > 1 else None
+    lse = torch.empty_like(cl) if T > 1 else None
 
     z = torch.empty_like(v)
     z_strides = (z.stride(0), z.stride(1), B * z.stride(2), z.stride(2), z.stride(3))
@@ -582,18 +569,14 @@ def monarch_attention_triton(
             v,
             *v_strides,
             cr,
-            *cr_strides,
             al,
-            *al_strides,
             y,
-            *y_strides,
             cl,
-            *cl_strides,
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
             IS_FIRST_CALL=is_first_call,  # type: ignore
-            sm_scale=sm_scale,
+            qk_scale=qk_scale,
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
@@ -603,13 +586,10 @@ def monarch_attention_triton(
 
         _z_kernel[grid_z](
             al,
-            *al_strides,
             q,
             *q_strides,
             y,
-            *y_strides,
             cl,
-            *cl_strides,
             lse,
             z,
             *z_strides,
@@ -622,16 +602,12 @@ def monarch_attention_triton(
 
         _ar_cr_kernel[grid_z](
             al,
-            *al_strides,
             q,
             *q_strides,
             cl,
-            *cl_strides,
             lse,
             ar,
-            *ar_strides,
             cr,
-            *cr_strides,
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
@@ -653,18 +629,14 @@ def monarch_attention_triton(
         v,
         *v_strides,
         cr,
-        *cr_strides,
         al,
-        *al_strides,
         y,
-        *y_strides,
         cl,
-        *cl_strides,
         attn_mask,
         *attn_mask_strides,
         *HMBDN,
         IS_FIRST_CALL=is_first_call_y,  # type: ignore
-        sm_scale=sm_scale,
+        qk_scale=qk_scale,
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
@@ -674,13 +646,10 @@ def monarch_attention_triton(
 
     _z_kernel[grid_z](
         al,
-        *al_strides,
         q,
         *q_strides,
         y,
-        *y_strides,
         cl,
-        *cl_strides,
         lse,
         z,
         *z_strides,
