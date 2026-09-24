@@ -23,8 +23,25 @@ class Logger:
         attention_type = config.attention_type
         if isinstance(attention_type, dict):
             attention_type = attention_type[0]
+        # Full attention settings, so results with different settings can be told apart
+        settings = {
+            name: getattr(config, name, None)
+            for name in (
+                "block_size",
+                "num_steps",
+                "pad_type",
+                "rank",
+                "enable_flash_attention",
+            )
+        }
+        settings["layers"] = config.attention_type
+        record = {
+            "attention_type": attention_type,
+            "attention": settings,
+            "result": result,
+        }
         with open(save_path, "w") as f:
-            json.dump({"attention_type": attention_type, "result": result}, f)
+            json.dump(record, f)
 
         return file_name
 
