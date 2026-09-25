@@ -255,3 +255,26 @@ def test_workspace_limit_positions(T, pre_pad, positions):
             q, k, v, mask, T, B, pre_pad, max_workspace=budget
         )
         torch.testing.assert_close(out, full, atol=1e-3, rtol=1e-3)
+
+
+@requires_cuda
+@pytest.mark.parametrize("T", [1, 2, 3])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float16])
+def test_padded_queries_finite(T, dtype):
+    """Sequences shorter than a block leave positions without valid queries;
+    their (unused) outputs must stay finite, as in the reference: models keep
+    processing padded tokens, and a NaN there spreads to every token."""
+    from ma.ma_triton import monarch_attention_triton
+
+    torch.manual_seed(0)
+    E, H, N, D, B = 3, 2, 256, 32, 96
+    q, k, v = _rand_qkv(E, H, N, D, dtype)
+    mask = (
+        torch.arange(N, device="cuda")[None] < torch.tensor([[256], [150], [40]]).cuda()
+    )
+    out = monarch_attention_triton(q, k, v, mask, T, B, False)
+    expected = monarch_attention_torch(
+        q.float(), k.float(), v.float(), mask, T, B, False
+    )
+    assert torch.isfinite(out).all()
+    torch.testing.assert_close(out.float(), expected, atol=2e-2, rtol=2e-2)

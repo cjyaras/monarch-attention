@@ -203,7 +203,9 @@ def _al_cl_kernel(
         # Base-2 logits s, and p = exp2(s - max) for the chunk
         s = QK_SCALE * tl.dot(ar, tl.trans(k))
         if not IS_FIRST_CALL:
-            s = s / cr[:, None]
+            # Positions without valid queries have cr = 0 (and s = 0): as in
+            # the reference, add a tiny epsilon so padded tokens stay finite
+            s = s / (cr[:, None] + 1e-12)
         s = tl.where(k_mask_c[None, :], s, float("-inf"))
         new_max = tl.maximum(row_max, tl.max(s, axis=1))
         # Rows whose keys so far are all masked keep a max of -inf; shift by 0
