@@ -376,7 +376,9 @@ def _ar_cr_kernel(
             + (stride_cl_m * range_r)
         )
         al_scale = tl.load(al_scale_ptrs, mask=mask_r, other=0.0)
-        al = (al.to(tl.float32) * al_scale[:, None]).to(q_ptr.dtype.element_ty)
+        al = (
+            al.to(q_ptr.dtype.element_ty) * al_scale.to(q_ptr.dtype.element_ty)[:, None]
+        )
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e
@@ -560,7 +562,7 @@ def _z_kernel(
         )
         if FP8:
             al_scale = tl.load(al_scale_ptr + scale_ptr_offset, mask=mask_c, other=0.0)
-            al = (al.to(tl.float32) * al_scale[:, None]).to(q.dtype)
+            al = al.to(q.dtype) * al_scale.to(q.dtype)[:, None]
         cl_block_ptr = (
             cl_ptr
             + stride_cl_e * idx_e
@@ -591,7 +593,7 @@ def _z_kernel(
                 y_scale = tl.load(
                     y_scale_ptr + scale_ptr_offset, mask=mask_c, other=0.0
                 )
-                y = (y.to(tl.float32) * y_scale[:, None]).to(q.dtype)
+                y = y.to(q.dtype) * y_scale.to(q.dtype)[:, None]
             acc = alpha[:, None] * acc + tl.dot(p.to(y.dtype), y)
 
     if COMPUTE_Z:
