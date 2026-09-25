@@ -65,6 +65,15 @@ out = attn(q, k, v, mask)  # (2, 12, 1024, 64)
 
 Use `impl="torch"` for the reference implementation, which also runs on CPU.
 
+Options for the Triton kernels:
+
+- `max_workspace` (default 256 MiB): the most bytes of intermediate buffers per call. They
+  take ~2x the output's memory, so larger inputs are processed a group of batch elements,
+  heads or positions at a time (a few percent slower). `None` removes the limit.
+- `fp8=True`: store the intermediate buffers in FP8 with per-row scales, halving their memory
+  with no measurable accuracy change on the ViT and RoBERTa benchmarks. Needs FP8 support
+  (e.g. an H100); up to 1.17x faster at 1K-16K tokens, a few percent slower at 32K.
+
 Run the tests (CUDA-only tests are skipped without a GPU):
 
 ```
