@@ -257,6 +257,46 @@ def test_workspace_limit_positions(T, pre_pad, positions):
         torch.testing.assert_close(out, full, atol=1e-3, rtol=1e-3)
 
 
+requires_fp8 = pytest.mark.skipif(
+    not torch.cuda.is_available() or torch.cuda.get_device_capability() < (8, 9),
+    reason="FP8 needs compute capability 8.9 or newer",
+)
+
+
+@requires_fp8
+@pytest.mark.parametrize("T", [1, 2])
+@pytest.mark.parametrize("pre_pad", [False, True])
+@pytest.mark.parametrize("max_workspace", [None, 1])
+def test_fp8(T, pre_pad, max_workspace):
+    """FP8 intermediates (per-row scales) stay close to the reference; with
+    max_workspace=1 every group is a few positions of one head."""
+    from ma.ma_triton import monarch_attention_triton
+
+    torch.manual_seed(0)
+    E, H, N, D, B = 2, 3, 1000, 64, 32
+    q, k, v = _rand_qkv(E, H, N, D, torch.float16)
+    mask = _make_block_safe_mask(E, N, B)
+    expected = monarch_attention_torch(q, k, v, mask, T, B, pre_pad)
+    for _ in range(2):  # the second call launches cached kernels
+        out = monarch_attention_triton(
+            q, k, v, mask, T, B, pre_pad, max_workspace=max_workspace, fp8=True
+        )
+        keep = mask[:, None, :, None].expand_as(q)
+        torch.testing.assert_close(out[keep], expected[keep], atol=5e-2, rtol=5e-2)
+
+
+@requires_fp8
+def test_fp8_compiled():
+    from ma import MonarchAttention, PadType
+
+    torch.manual_seed(0)
+    q, k, v = _rand_qkv(2, 4, 300, 32, torch.float16)
+    attn = MonarchAttention(16, 1, PadType.post, impl="triton", fp8=True)
+    torch.testing.assert_close(
+        torch.compile(attn, fullgraph=True)(q, k, v), attn(q, k, v)
+    )
+
+
 @requires_cuda
 @pytest.mark.parametrize("T", [1, 2, 3])
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float16])

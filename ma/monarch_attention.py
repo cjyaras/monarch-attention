@@ -53,6 +53,10 @@ class MonarchAttention(nn.Module):
             buffers per call (default 256 MiB; None: no limit). The buffers take
             ~2x the output's memory, so larger inputs are processed a group of
             heads or batch elements at a time.
+        fp8: for the Triton kernels, store the intermediate buffers in FP8 e4m3
+            with per-row scales: half their memory and less memory traffic, with
+            no measurable accuracy change on the ViT and RoBERTa benchmarks.
+            Needs a GPU with FP8 support (e.g. an H100).
 
     `forward(query, key, value, attention_mask=None)` takes tensors of shape
     (batch, heads, seq_len, head_dim) and an optional (batch, seq_len) mask that
@@ -66,6 +70,7 @@ class MonarchAttention(nn.Module):
         pad_type: PadType,
         impl: str = "torch",
         max_workspace: int | None = MAX_WORKSPACE,
+        fp8: bool = False,
     ):
         super().__init__()
         if IMPLEMENTATIONS.get(impl) is None:
@@ -78,12 +83,17 @@ class MonarchAttention(nn.Module):
         self.pad_type = pad_type
         self.impl = impl
         self.max_workspace = max_workspace
+        self.fp8 = fp8
 
     def forward(self, query, key, value, attention_mask=None):
         impl = _impl_override or self.impl
         if attention_mask is not None:
             attention_mask = attention_mask.bool()
-        options = {"max_workspace": self.max_workspace} if impl == "triton" else {}
+        options = (
+            {"max_workspace": self.max_workspace, "fp8": self.fp8}
+            if impl == "triton"
+            else {}
+        )
         return IMPLEMENTATIONS[impl](
             query,
             key,

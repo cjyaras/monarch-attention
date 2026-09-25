@@ -86,6 +86,8 @@ def _al_cl_kernel(
     al_ptr,
     y_ptr,
     cl_ptr,
+    al_scale_ptr,
+    y_scale_ptr,
     mask_ptr,
     stride_mask_e,
     stride_mask_m,
@@ -105,6 +107,7 @@ def _al_cl_kernel(
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
+    FP8: tl.constexpr,  # al and y are FP8 with per-row scales (cl's layout)
     COMPUTE_Y: tl.constexpr,
 ):
     # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
@@ -250,8 +253,20 @@ def _al_cl_kernel(
     )
     tl.store(cl_block_ptr, cl, mask=mask_r)
 
-    # Store al
-    al = (QK_SCALE * acc_al * inv_denom[:, None]).to(ar.dtype)
+    # Store al (and y): FP8 rows divided by their max magnitude / 448, the
+    # largest FP8 e4m3 value, plus that scale per row
+    al = QK_SCALE * acc_al * inv_denom[:, None]
+    scale_ptr_offset = (
+        stride_cl_e * idx_e
+        + stride_cl_h * idx_h
+        + stride_cl_m * idx_m
+        + (stride_cl_b * local_r)
+    )
+    if FP8:
+        al_scale = tl.maximum(tl.max(tl.abs(al), axis=1), 1e-30) / 448.0
+        tl.store(al_scale_ptr + scale_ptr_offset, al_scale, mask=mask_r)
+        al = al / al_scale[:, None]
+    al = al.to(al_ptr.dtype.element_ty)
     al_block_ptr = (
         al_ptr
         + stride_al_e * idx_e
@@ -262,7 +277,12 @@ def _al_cl_kernel(
     tl.store(al_block_ptr, al, mask=mask_r[:, None] & mask_d[None, :])
 
     if COMPUTE_Y:
-        y = (acc_y * inv_denom[:, None]).to(ar.dtype)
+        y = acc_y * inv_denom[:, None]
+        if FP8:
+            y_scale = tl.maximum(tl.max(tl.abs(y), axis=1), 1e-30) / 448.0
+            tl.store(y_scale_ptr + scale_ptr_offset, y_scale, mask=mask_r)
+            y = y / y_scale[:, None]
+        y = y.to(y_ptr.dtype.element_ty)
         y_block_ptr = (
             y_ptr
             + stride_y_e * idx_e
@@ -284,6 +304,7 @@ def _ar_cr_kernel(
     stride_q_d,
     cl_ptr,
     lse_ptr,  # same layout as cl
+    al_scale_ptr,
     ar_ptr,
     cr_ptr,
     mask_ptr,
@@ -303,6 +324,7 @@ def _ar_cr_kernel(
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
+    FP8: tl.constexpr,  # al and y are FP8 with per-row scales (cl's layout)
     ALL_BLOCKS: tl.constexpr,
 ):
     # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
@@ -345,6 +367,16 @@ def _ar_cr_kernel(
         + (stride_al_m * range_r[:, None] + stride_al_d * range_d[None, :])
     )
     al = tl.load(al_block_ptr, mask=mask_r[:, None] & mask_d[None, :], other=0.0)
+    if FP8:
+        al_scale_ptrs = (
+            al_scale_ptr
+            + stride_cl_e * idx_e
+            + stride_cl_h * idx_h
+            + stride_cl_b * idx_bl
+            + (stride_cl_m * range_r)
+        )
+        al_scale = tl.load(al_scale_ptrs, mask=mask_r, other=0.0)
+        al = (al.to(tl.float32) * al_scale[:, None]).to(q_ptr.dtype.element_ty)
     cl_block_ptr = (
         cl_ptr
         + stride_cl_e * idx_e
@@ -418,7 +450,11 @@ def _ar_cr_kernel(
         + stride_ar_b * idx_bl
         + (stride_ar_m * range_r[:, None] + stride_ar_d * range_d[None, :])
     )
-    tl.store(ar_block_ptr, acc_ar.to(al.dtype), mask=mask_r[:, None] & mask_d[None, :])
+    tl.store(
+        ar_block_ptr,
+        acc_ar.to(ar_ptr.dtype.element_ty),
+        mask=mask_r[:, None] & mask_d[None, :],
+    )
 
 
 @triton.jit
@@ -433,6 +469,8 @@ def _z_kernel(
     y_ptr,
     cl_ptr,
     lse_ptr,  # same layout as cl
+    al_scale_ptr,
+    y_scale_ptr,
     z_ptr,
     stride_z_e,
     stride_z_h,
@@ -451,6 +489,7 @@ def _z_kernel(
     BLOCK_C: tl.constexpr,
     BLOCK_D: tl.constexpr,
     PRE_PAD: tl.constexpr,
+    FP8: tl.constexpr,  # al and y are FP8 with per-row scales (cl's layout)
     COMPUTE_Z: tl.constexpr,
 ):
     # Intermediate buffers: al, y, cl (and lse) are laid out (E, H, B, M, ...) so
@@ -513,6 +552,15 @@ def _z_kernel(
             + (stride_al_m * range_c[:, None] + stride_al_d * range_d[None, :])
         )
         al = tl.load(al_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
+        scale_ptr_offset = (
+            stride_cl_e * idx_e
+            + stride_cl_h * idx_h
+            + stride_cl_b * idx_bl
+            + (stride_cl_m * range_c)
+        )
+        if FP8:
+            al_scale = tl.load(al_scale_ptr + scale_ptr_offset, mask=mask_c, other=0.0)
+            al = (al.to(tl.float32) * al_scale[:, None]).to(q.dtype)
         cl_block_ptr = (
             cl_ptr
             + stride_cl_e * idx_e
@@ -539,6 +587,11 @@ def _z_kernel(
                 + (stride_y_m * range_c[:, None] + stride_y_d * range_d[None, :])
             )
             y = tl.load(y_block_ptr, mask=mask_c[:, None] & mask_d[None, :], other=0.0)
+            if FP8:
+                y_scale = tl.load(
+                    y_scale_ptr + scale_ptr_offset, mask=mask_c, other=0.0
+                )
+                y = (y.to(tl.float32) * y_scale[:, None]).to(q.dtype)
             acc = alpha[:, None] * acc + tl.dot(p.to(y.dtype), y)
 
     if COMPUTE_Z:
@@ -563,7 +616,7 @@ def _z_kernel(
 
 
 def _monarch_attention(
-    q, k, v, attn_mask, T, B, pre_pad, launch, z, b0=0, Bg=None
+    q, k, v, attn_mask, T, B, pre_pad, launch, z, b0=0, Bg=None, fp8=False
 ) -> None:
     """The kernel launches, writing the output into z; `launch` wraps each
     kernel (wrap_triton in the op). Only positions b0 to b0 + Bg of each block
@@ -599,9 +652,13 @@ def _monarch_attention(
 
     # Intermediate buffers, contiguous in the layouts the kernels assume
     # (_strides_bm, _strides_mb)
-    al = torch.empty(E, H, Bg, M, D, device=q.device, dtype=q.dtype)
+    stored = torch.float8_e4m3fn if fp8 else q.dtype  # al and y
+    al = torch.empty(E, H, Bg, M, D, device=q.device, dtype=stored)
     y = torch.empty_like(al)
     cl = torch.empty(E, H, Bg, M, device=q.device, dtype=torch.float)
+    # FP8 al and y: one scale per row, in cl's layout
+    al_scale = torch.empty_like(cl) if fp8 else None
+    y_scale = torch.empty_like(cl) if fp8 else None
     # Only needed for T > 1: ar, cr and each query's log-sum-exp over blocks
     ar = torch.empty(E, H, M, Bg, D, device=q.device, dtype=q.dtype) if T > 1 else None
     ar_strides = (H * M * Bg * D, M * Bg * D, Bg * D, D, 1)
@@ -634,6 +691,8 @@ def _monarch_attention(
             al,
             y,
             cl,
+            al_scale,
+            y_scale,
             attn_mask,
             *attn_mask_strides,
             *HMBDN,
@@ -643,6 +702,7 @@ def _monarch_attention(
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
+            FP8=fp8,  # type: ignore
             COMPUTE_Y=False,  # type: ignore
             **config_b,
         )
@@ -655,12 +715,15 @@ def _monarch_attention(
                 y,
                 cl,
                 lse,
+                al_scale,
+                y_scale,
                 z,
                 *z_strides,
                 *HMBDN,
                 NUM_CHUNKS=chunks_m,  # type: ignore
                 BLOCK_D=BLOCK_D,  # type: ignore
                 PRE_PAD=pre_pad,  # type: ignore
+                FP8=fp8,  # type: ignore
                 COMPUTE_Z=False,  # type: ignore
                 **config_z,
             )
@@ -671,6 +734,7 @@ def _monarch_attention(
             *q_strides,
             cl,
             lse,
+            al_scale,
             ar,
             cr,
             attn_mask,
@@ -680,6 +744,7 @@ def _monarch_attention(
             HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
             BLOCK_D=BLOCK_D,  # type: ignore
             PRE_PAD=pre_pad,  # type: ignore
+            FP8=fp8,  # type: ignore
             ALL_BLOCKS=all_blocks,  # type: ignore
             **config_m,
         )
@@ -699,6 +764,8 @@ def _monarch_attention(
         al,
         y,
         cl,
+        al_scale,
+        y_scale,
         attn_mask,
         *attn_mask_strides,
         *HMBDN,
@@ -708,6 +775,7 @@ def _monarch_attention(
         HAS_ATTN_MASK=attn_mask is not None,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
+        FP8=fp8,  # type: ignore
         COMPUTE_Y=True,  # type: ignore
         **config_b,
     )
@@ -719,12 +787,15 @@ def _monarch_attention(
         y,
         cl,
         lse,
+        al_scale,
+        y_scale,
         z,
         *z_strides,
         *HMBDN,
         NUM_CHUNKS=chunks_m,  # type: ignore
         BLOCK_D=BLOCK_D,  # type: ignore
         PRE_PAD=pre_pad,  # type: ignore
+        FP8=fp8,  # type: ignore
         COMPUTE_Z=True,  # type: ignore
         **config_z,
     )
@@ -733,17 +804,22 @@ def _monarch_attention(
 MAX_WORKSPACE = 256 * 2**20  # bytes of intermediate buffers per call, by default
 
 
-def _workspace_per_head(q, T, B) -> int:
+def _workspace_per_head(q, T, B, fp8=False) -> int:
     """Bytes of intermediate buffers for one (batch element, head)."""
     M = triton.cdiv(q.shape[2], B)
     tokens, D, size = M * B, q.shape[3], q.element_size()
-    per_head = 2 * tokens * D * size + 4 * tokens  # al, y, cl
+    stored = 1 if fp8 else size  # al and y
+    per_head = 2 * tokens * D * stored + 4 * tokens  # al, y, cl
+    if fp8:
+        per_head += 2 * 4 * tokens  # their scales
     if T > 1:
         per_head += tokens * D * size + 2 * 4 * tokens  # ar, cr, lse
     return per_head
 
 
-def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Tensor:
+def _sliced(
+    q, k, v, attn_mask, T, B, pre_pad, max_workspace, fp8, make_launch
+) -> Tensor:
     """Run the kernels on groups whose intermediate buffers fit in max_workspace
     bytes (0: no limit), one group at a time: batch elements, else heads of one
     batch element, else positions of one head. Every position b of a block only
@@ -751,7 +827,7 @@ def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Te
     (each group re-reads all keys and values)."""
     E, H = q.shape[:2]
     z = torch.empty_like(v)
-    per_head = _workspace_per_head(q, T, B)
+    per_head = _workspace_per_head(q, T, B, fp8)
     heads = max_workspace // per_head if max_workspace else E * H
     everything = (slice(None), slice(None), 0, B)
     if heads >= E * H:
@@ -788,6 +864,7 @@ def _sliced(q, k, v, attn_mask, T, B, pre_pad, max_workspace, make_launch) -> Te
             z[batch, head],
             b0,
             Bg,
+            fp8,
         )
     return z
 
@@ -804,9 +881,10 @@ def _monarch_attention_op(
     B: int,
     pre_pad: bool,
     max_workspace: int,
+    fp8: bool,
 ) -> Tensor:
     return _sliced(
-        q, k, v, attn_mask, T, B, pre_pad, max_workspace, lambda _: wrap_triton
+        q, k, v, attn_mask, T, B, pre_pad, max_workspace, fp8, lambda _: wrap_triton
     )
 
 
@@ -819,13 +897,18 @@ def monarch_attention_triton(
     B: int,
     pre_pad: bool,
     max_workspace: int | None = MAX_WORKSPACE,
+    fp8: bool = False,
 ) -> Tensor:
     """MonarchAttention with the Triton kernels. The intermediate buffers take
     ~2x the output's memory; with max_workspace (bytes; None: no limit), heads
-    and batch elements are processed in groups whose buffers fit in it."""
+    and batch elements are processed in groups whose buffers fit in it. With
+    fp8, the buffers al and y are FP8 e4m3 with per-row scales (half the
+    memory and less traffic; needs a GPU with FP8 support, e.g. an H100)."""
     max_workspace = max_workspace or 0
     if torch.compiler.is_compiling():
-        return _monarch_attention_op(q, k, v, attn_mask, T, B, pre_pad, max_workspace)
+        return _monarch_attention_op(
+            q, k, v, attn_mask, T, B, pre_pad, max_workspace, fp8
+        )
     # Everything Triton specializes the kernels on (shapes, strides, dtypes,
     # pointer alignment) is a function of this key and the group number
     key = (
@@ -839,6 +922,7 @@ def monarch_attention_triton(
         B,
         pre_pad,
         max_workspace,
+        fp8,
     )
     key += (q.data_ptr() % 16, k.data_ptr() % 16, v.data_ptr() % 16)
     if attn_mask is not None:
@@ -853,6 +937,7 @@ def monarch_attention_triton(
         B,
         pre_pad,
         max_workspace,
+        fp8,
         lambda group: _CachedLaunch(key + (group,), q.device.index),
     )
 
